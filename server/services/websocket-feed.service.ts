@@ -24,6 +24,8 @@ export class WebSocketFeedService {
       console.log("🔌 React UI WebSocket client connected");
 
       let activeConfig = MarketDataService.getSymbolConfig("btcusdt");
+      let lastSentPrice: number | null = null;
+      let lastDepthSentAt = 0;
 
       const sendTick = () => {
         if (ws.readyState !== WebSocket.OPEN) return;
@@ -31,6 +33,16 @@ export class WebSocketFeedService {
         const currentPrice = activeConfig.basePrice;
         const prevClose = activeConfig.prevClose || currentPrice * 0.99;
         const depth = this.depthBySymbol.get(activeConfig.id.toLowerCase());
+        const now = Date.now();
+
+        // Only push a tick when the real price changed, or when the order book
+        // refreshed (so the depth panel stays live without moving the price line).
+        const priceChanged = currentPrice !== lastSentPrice;
+        const depthRefreshed = depth !== undefined && now - lastDepthSentAt > 1000;
+        if (!priceChanged && !depthRefreshed) return;
+
+        lastSentPrice = currentPrice;
+        lastDepthSentAt = now;
 
         ws.send(
           JSON.stringify({
