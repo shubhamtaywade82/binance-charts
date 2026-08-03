@@ -17,7 +17,7 @@ import type {
   ICTSilverBulletWindow,
 } from "./ictEngine";
 
-export type SetupDirection = "CE_LONG" | "PE_LONG" | "NO_TRADE";
+export type SetupDirection = "LONG" | "SHORT" | "NO_TRADE";
 export type Bias = "bullish" | "bearish" | "neutral";
 
 export interface SetupFactor {
@@ -28,17 +28,18 @@ export interface SetupFactor {
   tf?: string;
 }
 
-export interface StrikePick {
-  strike: number;
+export interface EntryLevel {
+  price: number;
   label: string;
   rationale: string;
 }
 
-export interface StrikeRecommendation {
-  instrument: string;
-  optionType: "CE" | "PE";
-  primary: StrikePick;
-  alternates: StrikePick[];
+export interface EntryRecommendation {
+  symbol: string;
+  side: "LONG" | "SHORT";
+  entry: EntryLevel;
+  stop: EntryLevel;
+  target: EntryLevel;
 }
 
 export interface SetupSignal {
@@ -48,7 +49,7 @@ export interface SetupSignal {
   confluence: SetupFactor[];
   alignedCount: number;
   biasTf?: string;
-  recommendedStrikes?: StrikeRecommendation;
+  recommendedEntry?: EntryRecommendation;
   notes: string[];
 }
 
@@ -77,18 +78,6 @@ export interface SetupScanInput {
   cp: CandlestickPattern[];
   htf?: HtfBias;
   symbol?: string;
-  strikeInterval?: number;
-}
-
-/** Strike width per scrip (mirrors server option-chain convention). */
-export function strikeIntervalForSymbol(symbol: string): number {
-  const key = (symbol || "").toLowerCase();
-  if (key.includes("btc")) return 1000;
-  if (key.includes("eth")) return 100;
-  if (key.includes("sol")) return 5;
-  if (key.includes("bnb")) return 10;
-  if (key.includes("xrp") || key.includes("doge") || key.includes("ada")) return 0.05;
-  return 10;
 }
 
 /** Aggregate candles into a higher timeframe bucket (e.g. 15m -> 60m). */
@@ -260,13 +249,13 @@ const patternConf = (cp: CandlestickPattern[], bias: Bias): SetupFactor => {
   };
 };
 
-const longNotes = (input: SetupScanInput, price: number, side: "CE" | "PE"): string[] => {
-  if (side === "CE") {
+const longNotes = (input: SetupScanInput, price: number, side: "LONG" | "SHORT"): string[] => {
+  if (side === "LONG") {
     const sweep = input.liquidity.filter((p) => p.type === "BSL" && p.swept).sort((a, b) => (b.sweepTime ?? 0) - (a.sweepTime ?? 0))[0];
     const demand = input.ob.filter((o) => o.type === "BULLISH_OB" && !o.mitigated).sort((a, b) => b.bottom - a.bottom)[0];
     const target = input.liquidity.filter((p) => p.type === "BSL" && !p.swept && p.level > price).sort((a, b) => a.level - b.level)[0];
     return [
-      `Buy CE on retrace into demand OB/FVG${demand ? ` (stop below ${demand.bottom.toFixed(2)})` : ""}${sweep ? ` — BSL swept at ${sweep.level.toFixed(2)}` : ""}`,
+      `Long on retrace into demand OB/FVG${demand ? ` (stop below ${demand.bottom.toFixed(2)})` : ""}${sweep ? ` — BSL swept at ${sweep.level.toFixed(2)}` : ""}`,
       target ? `Target: next untapped BSL at ${target.level.toFixed(2)}` : "Target: nearest untapped BSL above",
     ];
   }
@@ -274,7 +263,7 @@ const longNotes = (input: SetupScanInput, price: number, side: "CE" | "PE"): str
   const supply = input.ob.filter((o) => o.type === "BEARISH_OB" && !o.mitigated).sort((a, b) => a.top - b.top)[0];
   const target = input.liquidity.filter((p) => p.type === "SSL" && !p.swept && p.level < price).sort((a, b) => b.level - a.level)[0];
   return [
-    `Buy PE on retrace into supply OB/FVG${supply ? ` (stop above ${supply.top.toFixed(2)})` : ""}${sweep ? ` — SSL swept at ${sweep.level.toFixed(2)}` : ""}`,
+    `Short on retrace into supply OB/FVG${supply ? ` (stop above ${supply.top.toFixed(2)})` : ""}${sweep ? ` — SSL swept at ${sweep.level.toFixed(2)}` : ""}`,
     target ? `Target: next untapped SSL at ${target.level.toFixed(2)}` : "Target: nearest untapped SSL below",
   ];
 };
@@ -284,41 +273,52 @@ const pick = (htf: SetupFactor | undefined, ltf: SetupFactor): SetupFactor => {
   return ltf;
 };
 
-const ATM = { label: "ATM", rationale: "Most liquid — delta ~0.5, tightest spread" };
-const OTM1 = { label: "OTM 1", rationale: "Cheaper premium — delta ~0.35, best risk/reward" };
-const OTM2 = { label: "OTM 2", rationale: "Cheapest premium — max leverage, needs strong momentum" };
-
-/** Long-options strike ladder: prefer OTM1, step to OTM2 when confluence is very strong. */
-export function recommendStrikes(
-  price: number,
-  direction: SetupDirection,
-  alignedCount: number,
-  strikeInterval: number,
-  symbol: string
-): StrikeRecommendation | undefined {
+/** Futures entry plan: market entry, stop at nearest untapped OB, target at next liquidity pool. */
+export function recommendEntry(input: SetupScanInput, direction: SetupDirection): EntryRecommendation | undefined {
   if (direction === "NO_TRADE") return undefined;
-  const optionType = direction === "CE_LONG" ? "CE" : "PE";
-  const atm = Math.round(price / strikeInterval) * strikeInterval;
-  const dir = optionType === "CE" ? 1 : -1;
-  const primaryOffset = alignedCount >= 5 ? 2 : 1;
-  const altOffset = primaryOffset === 2 ? 1 : 2;
-  const [primaryMeta, altMeta] = primaryOffset === 2 ? [OTM2, OTM1] : [OTM1, OTM2];
-  return {
-    instrument: (symbol || "OPTION").toUpperCase(),
-    optionType,
-    primary: {
-      strike: atm + primaryOffset * dir * strikeInterval,
-      label: primaryMeta.label,
-      rationale: primaryMeta.rationale,
-    },
-    alternates: [
-      { strike: atm, label: ATM.label, rationale: ATM.rationale },
-      {
-        strike: atm + altOffset * dir * strikeInterval,
-        label: altMeta.label,
-        rationale: altMeta.rationale,
+  const price = input.lastPrice;
+  const symbol = (input.symbol || "FUTURE").toUpperCase();
+
+  if (direction === "LONG") {
+    const demand = input.ob.filter((o) => o.type === "BULLISH_OB" && !o.mitigated && o.bottom < price).sort((a, b) => b.bottom - a.bottom)[0];
+    const target = input.liquidity.filter((p) => p.type === "BSL" && !p.swept && p.level > price).sort((a, b) => a.level - b.level)[0];
+    const stopPrice = demand ? demand.bottom : Number((price * 0.98).toFixed(2));
+    const targetPrice = target ? target.level : Number((price * 1.05).toFixed(2));
+    return {
+      symbol,
+      side: "LONG",
+      entry: { price, label: "MARKET ENTRY", rationale: "Enter on signal confirmation at market" },
+      stop: {
+        price: stopPrice,
+        label: "STOP",
+        rationale: demand ? `Below demand OB at ${stopPrice.toFixed(2)}` : "No demand zone below — 2% buffer stop",
       },
-    ],
+      target: {
+        price: targetPrice,
+        label: "TARGET",
+        rationale: target ? `Next untapped BSL at ${targetPrice.toFixed(2)}` : "No BSL above — 5% momentum target",
+      },
+    };
+  }
+
+  const supply = input.ob.filter((o) => o.type === "BEARISH_OB" && !o.mitigated && o.top > price).sort((a, b) => a.top - b.top)[0];
+  const target = input.liquidity.filter((p) => p.type === "SSL" && !p.swept && p.level < price).sort((a, b) => b.level - a.level)[0];
+  const stopPrice = supply ? supply.top : Number((price * 1.02).toFixed(2));
+  const targetPrice = target ? target.level : Number((price * 0.95).toFixed(2));
+  return {
+    symbol,
+    side: "SHORT",
+    entry: { price, label: "MARKET ENTRY", rationale: "Enter on signal confirmation at market" },
+    stop: {
+      price: stopPrice,
+      label: "STOP",
+      rationale: supply ? `Above supply OB at ${stopPrice.toFixed(2)}` : "No supply zone above — 2% buffer stop",
+    },
+    target: {
+      price: targetPrice,
+      label: "TARGET",
+      rationale: target ? `Next untapped SSL at ${targetPrice.toFixed(2)}` : "No SSL below — 5% momentum target",
+    },
   };
 }
 
@@ -358,11 +358,11 @@ export function scanSetups(input: SetupScanInput): SetupSignal {
   let direction: SetupDirection = "NO_TRADE";
   const notes: string[] = [];
   if (bias === "bullish" && bulls >= 2 && alignedCount >= 3) {
-    direction = "CE_LONG";
-    notes.push(...longNotes(input, price, "CE"));
+    direction = "LONG";
+    notes.push(...longNotes(input, price, "LONG"));
   } else if (bias === "bearish" && bears >= 2 && alignedCount >= 3) {
-    direction = "PE_LONG";
-    notes.push(...longNotes(input, price, "PE"));
+    direction = "SHORT";
+    notes.push(...longNotes(input, price, "SHORT"));
   } else {
     if (bias === "neutral") notes.push("Bias undecided — need 2/3 of structure, AMD, sweep agreement");
     if (alignedCount < 3) notes.push(`Only ${alignedCount}/6 confluence points aligned — waiting for more`);
@@ -375,7 +375,7 @@ export function scanSetups(input: SetupScanInput): SetupSignal {
     confluence,
     alignedCount,
     biasTf,
-    recommendedStrikes: recommendStrikes(price, direction, alignedCount, input.strikeInterval ?? 50, input.symbol ?? ""),
+    recommendedEntry: recommendEntry(input, direction),
     notes,
   };
 }

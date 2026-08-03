@@ -78,7 +78,7 @@ export class WebSocketFeedService {
     if (this.binanceWsMap.has(symbolLower)) return;
 
     try {
-      const streamUrl = `wss://stream.binance.com:9443/ws/${symbolLower}@trade`;
+      const streamUrl = `wss://fstream.binance.com/ws/${symbolLower}@trade`;
       const bWs = new WebSocketClient(streamUrl);
 
       bWs.on("message", (data: any) => {

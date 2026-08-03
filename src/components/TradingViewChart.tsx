@@ -38,7 +38,7 @@ import {
   ICTJudasSwing,
   ICTAMDCycle,
 } from "../utils/ictEngine";
-import { scanSetups, resampleCandles, SetupSignal, HtfBias, strikeIntervalForSymbol } from "../utils/setupScanner";
+import { scanSetups, resampleCandles, SetupSignal, HtfBias } from "../utils/setupScanner";
 import {
   PaperAccount,
   createPaperAccount,
@@ -50,9 +50,6 @@ import {
   openPaperPosition,
   markPaperPosition,
   closePaperPosition,
-  isSessionEndISt,
-  fetchPaperQuote,
-  PaperOptionType,
 } from "../utils/paperTrader";
 
 export interface CandleTheme {
@@ -162,7 +159,7 @@ export interface ChartProps {
   tick?: any;
 }
 
-// HTF bias ladder: only timeframes DhanHQ serves (1/5/15/30/60m) as bases
+// HTF bias ladder: only Binance kline intervals (1/5/15/30/60m) as bases
 const autoHtfMult = (baseMin: number): number => {
   const ladder: Record<number, number> = { 1: 5, 5: 3, 15: 4, 30: 2, 60: 4 };
   return ladder[baseMin] ?? 4;
@@ -578,7 +575,7 @@ export const TradingViewChart: React.FC<ChartProps> = ({
     });
   };
 
-  // CE/PE Setup Scanner State (persisted to localStorage)
+  // Futures Setup Scanner State (persisted to localStorage)
   const [showSetupScan, setShowSetupScan] = useState<boolean>(() => {
     try {
       return localStorage.getItem("chart_show_setup_scan") !== "false";
@@ -594,7 +591,7 @@ export const TradingViewChart: React.FC<ChartProps> = ({
     });
   };
 
-  // MTF bias timeframe: AUTO uses the DhanHQ ladder, otherwise a multiple of the base interval
+  // MTF bias timeframe: AUTO uses the Binance ladder, otherwise a multiple of the base interval
   const [biasTfMult, setBiasTfMult] = useState<number | null>(() => {
     try {
       const saved = localStorage.getItem("chart_bias_tf_mult");
@@ -612,7 +609,7 @@ export const TradingViewChart: React.FC<ChartProps> = ({
 
   // ---- Paper trading engine state (forward-testing the setup scanner) ----
   const [paperEnabled, setPaperEnabled] = useState(() => {
-    try { return localStorage.getItem("dhan_paper_enabled") === "1"; } catch { return false; }
+    try { return localStorage.getItem("binance_paper_enabled") === "1"; } catch { return false; }
   });
   const [paperAccount, setPaperAccount] = useState<PaperAccount>(() => loadPaperAccount(symbol) ?? createPaperAccount(symbol));
   const [paperLog, setPaperLog] = useState<string[]>([]);
@@ -637,24 +634,24 @@ export const TradingViewChart: React.FC<ChartProps> = ({
   const togglePaper = () => {
     setPaperEnabled((prev) => {
       const next = !prev;
-      try { localStorage.setItem("dhan_paper_enabled", next ? "1" : "0"); } catch {}
+      try { localStorage.setItem("binance_paper_enabled", next ? "1" : "0"); } catch {}
       return next;
     });
   };
 
   const resetPaper = () => {
     setPaperAccount(resetPaperAccount(symbol));
-    setPaperLog(["Account reset — fresh ₹100,000"]);
+    setPaperLog(["Account reset — fresh $100,000 USDT"]);
   };
 
   const closeOpenPaper = async () => {
     const acc = paperRef.current.acc;
     if (!acc.open) return;
-    const quote = await fetchPaperQuote(symbol, acc.open.strike, acc.open.optionType, paperRef.current.spot || 0);
+    const exitPrice = paperRef.current.spot || acc.open.lastPrice;
     setPaperAccount((prev) => {
-      const { acc: closedAcc, trade } = closePaperPosition(prev, quote.premium, Date.now(), "MANUAL");
+      const { acc: closedAcc, trade } = closePaperPosition(prev, exitPrice, Date.now(), "MANUAL");
       if (trade) {
-        logPaper(`MANUAL CLOSE ${trade.optionType} ${trade.strike} ${trade.pnl >= 0 ? "+" : ""}₹${trade.pnl.toFixed(2)} (${trade.returnPct}%)`);
+        logPaper(`MANUAL CLOSE ${trade.side} @ $${trade.exitPrice.toFixed(2)} ${trade.pnl >= 0 ? "+" : ""}$${trade.pnl.toFixed(2)} (${trade.returnPct}%)`);
       }
       return closedAcc;
     });
@@ -674,61 +671,45 @@ export const TradingViewChart: React.FC<ChartProps> = ({
     const { signal, acc, spot } = paperRef.current;
     const now = Date.now();
 
-    // EOD exit at 15:25 IST
-    if (acc.open && isSessionEndISt(now)) {
-      const premium = acc.open.lastPremium;
-      const { acc: nextAcc, trade } = closePaperPosition(acc, premium, now, "EOD");
-      if (trade) {
-        logPaper(`EOD CLOSE ${acc.open.optionType} ${acc.open.strike} ${trade.pnl >= 0 ? "+" : ""}₹${trade.pnl.toFixed(2)} (${trade.returnPct}%)`);
-        setPaperAccount(nextAcc);
-        return;
-      }
-    }
-
-    // Quote target: the open position, else the scanner's recommended strike
+    // Quote target: the open position, else the scanner's recommended entry
     const open = acc.open;
-    const recommendation = signal?.recommendedStrikes;
+    const recommendation = signal?.recommendedEntry;
     const wantOpen = !open && recommendation !== undefined;
-    const strike = open ? open.strike : recommendation?.primary.strike ?? 0;
-    const optionType: PaperOptionType | undefined = open ? open.optionType : recommendation?.optionType;
-    if (!strike || !optionType || (!open && !wantOpen)) return;
-
-    const quote = await fetchPaperQuote(symbol, strike, optionType, spot || 0);
-    const premium = quote.premium;
+    const price = open ? spot || open.lastPrice : recommendation?.entry.price ?? 0;
+    if (!price || price <= 0 || (!open && !wantOpen)) return;
 
     setPaperAccount((prev) => {
       let nextAcc = prev;
       if (prev.open) {
-        const { acc: marked, trade } = markPaperPosition(prev, premium, now);
+        const { acc: marked, trade } = markPaperPosition(prev, price, now);
         if (trade) {
-          const side = `${trade.optionType} ${trade.strike}`;
-          logPaper(`${trade.exitReason === "STOP" ? "STOP" : "TARGET"} CLOSE ${side} ${trade.pnl >= 0 ? "+" : ""}₹${trade.pnl.toFixed(2)} (${trade.returnPct}%)`);
+          const side = `${trade.side} @ $${trade.exitPrice.toFixed(2)}`;
+          logPaper(`${trade.exitReason === "STOP" ? "STOP" : "TARGET"} CLOSE ${side} ${trade.pnl >= 0 ? "+" : ""}$${trade.pnl.toFixed(2)} (${trade.returnPct}%)`);
           return marked;
         }
         // Bias flip: close when the scanner emits the opposite direction
         const dir = paperRef.current.signal?.direction;
         const flipped =
-          (prev.open.optionType === "CE" && dir === "PE_LONG") ||
-          (prev.open.optionType === "PE" && dir === "CE_LONG");
+          (prev.open.side === "LONG" && dir === "SHORT") ||
+          (prev.open.side === "SHORT" && dir === "LONG");
         if (flipped) {
-          const { acc: closedAcc, trade: flipTrade } = closePaperPosition(marked, premium, now, "FLIP");
+          const { acc: closedAcc, trade: flipTrade } = closePaperPosition(marked, price, now, "FLIP");
           if (flipTrade) {
-            logPaper(`FLIP CLOSE ${flipTrade.optionType} ${flipTrade.strike} ${flipTrade.pnl >= 0 ? "+" : ""}₹${flipTrade.pnl.toFixed(2)} (${flipTrade.returnPct}%)`);
+            logPaper(`FLIP CLOSE ${flipTrade.side} @ $${flipTrade.exitPrice.toFixed(2)} ${flipTrade.pnl >= 0 ? "+" : ""}$${flipTrade.pnl.toFixed(2)} (${flipTrade.returnPct}%)`);
           }
           return closedAcc;
         }
         nextAcc = marked;
       } else if (wantOpen) {
         const opened = openPaperPosition(prev, {
-          optionType: recommendation.optionType,
-          strike: recommendation.primary.strike,
-          entryPremium: premium,
-          estimatedEntry: quote.estimated,
+          side: recommendation.side,
+          entryPrice: price,
+          estimatedEntry: false,
           now,
         });
         if (opened.open) {
           logPaper(
-            `OPEN ${opened.open.optionType} ${opened.open.strike} @ ₹${opened.open.entryPremium}${quote.estimated ? " (EST)" : ""} · stop ₹${opened.open.stopPremium} · tgt ₹${opened.open.targetPremium}`
+            `OPEN ${opened.open.side} ${symbol.toUpperCase()} @ $${opened.open.entryPrice.toFixed(2)} × ${opened.open.qty} · stop $${opened.open.stopPrice.toFixed(2)} · tgt $${opened.open.targetPrice.toFixed(2)}`
           );
         }
         nextAcc = opened;
@@ -773,9 +754,8 @@ export const TradingViewChart: React.FC<ChartProps> = ({
       cp: getCached("cp", () => detectCandlestickPatterns(latestNCandles(1000))),
       htf,
       symbol,
-      strikeInterval: strikeIntervalForSymbol(symbol),
     });
-    const key = `${signal.direction}|${signal.bias}|${signal.alignedCount}|${signal.biasTf ?? "ltf"}|${htfMult}|${signal.recommendedStrikes?.primary.strike ?? ""}`;
+    const key = `${signal.direction}|${signal.bias}|${signal.alignedCount}|${signal.biasTf ?? "ltf"}|${htfMult}|${signal.recommendedEntry?.entry.price ?? ""}`;
     if (key !== lastSignalKeyRef.current) {
       lastSignalKeyRef.current = key;
       setSetupSignal(signal);
@@ -1614,16 +1594,16 @@ export const TradingViewChart: React.FC<ChartProps> = ({
               borderColor: "rgba(255, 255, 255, 0.1)",
             },
             localization: {
-              locale: "en-IN",
+              locale: "en-US",
               timeFormatter: (timestamp: number) => {
                 const date = new Date(timestamp * 1000);
                 return (
-                  date.toLocaleTimeString("en-IN", {
-                    timeZone: "Asia/Kolkata",
-                    hour12: true,
+                  date.toLocaleTimeString("en-GB", {
+                    timeZone: "UTC",
+                    hour12: false,
                     hour: "2-digit",
                     minute: "2-digit",
-                  }) + " IST"
+                  }) + " UTC"
                 );
               },
               dateFormat: "dd MMM yyyy",
@@ -1720,7 +1700,7 @@ export const TradingViewChart: React.FC<ChartProps> = ({
               isFetchingHistoricalRef.current = true;
               setIsLazyLoading(true);
 
-              // Use the earliest loaded candle as toDate, go back 90 days (DhanHQ intraday limit)
+              // Use the earliest loaded candle as toDate, go back 90 days (Binance kline limit)
               const earliestTime = allCandlesRef.current.length > 0
                 ? allCandlesRef.current[0].time
                 : Math.floor(Date.now() / 1000);
@@ -1913,7 +1893,7 @@ export const TradingViewChart: React.FC<ChartProps> = ({
               });
             }
 
-            // Reconcile ALL previous candles with DhanHQ authoritative intraday endpoint 2.5s post-close
+            // Reconcile ALL previous candles with the Binance authoritative intraday endpoint 2.5s post-close
             setTimeout(async () => {
               try {
                 const res = await fetch(
@@ -1986,14 +1966,14 @@ export const TradingViewChart: React.FC<ChartProps> = ({
     return () => cancelAnimationFrame(animId);
   }, [livePrice, interval, tick]);
 
-  const activeLtp = livePrice || tick?.ltp || (lastCandleValRef.current?.close || 24263.40);
-  const activeChange = tick?.change !== undefined ? tick.change : 13.85;
-  const activePChange = tick?.pChange !== undefined ? tick.pChange : 0.06;
-  const activeVolume = tick?.volume || 199710932;
-  const activeSymbolName = tick?.symbol || (symbol.toUpperCase() === "NIFTY" ? "NIFTY 50" : symbol.toUpperCase() === "BANKNIFTY" ? "NIFTY BANK" : symbol.toUpperCase());
+  const activeLtp = livePrice || tick?.ltp || (lastCandleValRef.current?.close || 0);
+  const activeChange = tick?.change !== undefined ? tick.change : 0;
+  const activePChange = tick?.pChange !== undefined ? tick.pChange : 0;
+  const activeVolume = tick?.volume || 0;
+  const activeSymbolName = tick?.symbol || symbol.toUpperCase();
   const tickTimeFormatted = tick?.timestamp
-    ? new Date(tick.timestamp).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour12: true, hour: "2-digit", minute: "2-digit", second: "2-digit" }) + " IST"
-    : new Date().toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour12: true, hour: "2-digit", minute: "2-digit", second: "2-digit" }) + " IST";
+    ? new Date(tick.timestamp).toLocaleTimeString("en-GB", { timeZone: "UTC", hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" }) + " UTC"
+    : new Date().toLocaleTimeString("en-GB", { timeZone: "UTC", hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" }) + " UTC";
 
   return (
     <div style={{ position: "relative", width: "100%", height: "100%", minHeight: "520px" }}>
@@ -2032,7 +2012,7 @@ export const TradingViewChart: React.FC<ChartProps> = ({
           <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
             <span style={{ fontSize: "10px", color: "var(--text-muted)", fontWeight: 700 }}>LTP</span>
             <span style={{ fontWeight: 800, color: activeChange >= 0 ? "var(--accent-green)" : "var(--accent-red)" }}>
-              ₹{Number(activeLtp).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              ${Number(activeLtp).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </span>
           </div>
 
@@ -2052,7 +2032,7 @@ export const TradingViewChart: React.FC<ChartProps> = ({
           <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
             <span style={{ fontSize: "10px", color: "var(--text-muted)", fontWeight: 700 }}>VOL</span>
             <span style={{ fontWeight: 700, color: "#FFFFFF" }}>
-              {Number(activeVolume).toLocaleString("en-IN")}
+              {Number(activeVolume).toLocaleString("en-US")}
             </span>
           </div>
 
@@ -2551,10 +2531,10 @@ export const TradingViewChart: React.FC<ChartProps> = ({
                   SETUP TOOLS
                 </div>
 
-                {/* CE/PE Setup Scanner Toggle */}
+                {/* Futures Setup Scanner Toggle */}
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px", marginTop: "2px" }}>
                   <span style={{ fontSize: "11px", fontWeight: 600, color: showSetupScan ? "#00F5A0" : "var(--text-muted)" }}>
-                    CE/PE Setup Scanner
+                    Futures Setup Scanner
                   </span>
                   <button
                     onClick={toggleSetupScan}
@@ -2922,7 +2902,7 @@ export const TradingViewChart: React.FC<ChartProps> = ({
         </div>
       )}
 
-      {/* CE/PE Setup Scanner Panel */}
+      {/* Futures Setup Scanner Panel */}
       {showSetupScan && setupSignal && (
         <div style={{
           position: "absolute",
@@ -2946,11 +2926,11 @@ export const TradingViewChart: React.FC<ChartProps> = ({
             <span style={{ fontWeight: 700, letterSpacing: "0.5px", fontSize: "9px", color: "var(--text-muted)" }}>
               SETUP SCANNER{setupSignal.biasTf ? ` · BIAS ${setupSignal.biasTf}` : ""}
             </span>
-            {setupSignal.direction === "CE_LONG" && (
-              <span style={{ fontWeight: 800, fontSize: "12px", color: "#00F5A0" }}>BUY CE LONG</span>
+            {setupSignal.direction === "LONG" && (
+              <span style={{ fontWeight: 800, fontSize: "12px", color: "#00F5A0" }}>LONG FUTURES</span>
             )}
-            {setupSignal.direction === "PE_LONG" && (
-              <span style={{ fontWeight: 800, fontSize: "12px", color: "#FF495C" }}>BUY PE LONG</span>
+            {setupSignal.direction === "SHORT" && (
+              <span style={{ fontWeight: 800, fontSize: "12px", color: "#FF495C" }}>SHORT FUTURES</span>
             )}
             {setupSignal.direction === "NO_TRADE" && (
               <span style={{ fontWeight: 700, fontSize: "11px", color: "#8E9BAE" }}>NO TRADE</span>
@@ -2977,21 +2957,21 @@ export const TradingViewChart: React.FC<ChartProps> = ({
             </span>
           </div>
 
-          {setupSignal.recommendedStrikes && (
+          {setupSignal.recommendedEntry && (
             <div style={{
               marginBottom: "6px",
               padding: "6px 8px",
               borderRadius: "6px",
-              background: setupSignal.recommendedStrikes.optionType === "CE" ? "rgba(0, 245, 160, 0.08)" : "rgba(255, 73, 92, 0.08)",
-              border: `1px solid ${setupSignal.recommendedStrikes.optionType === "CE" ? "rgba(0, 245, 160, 0.35)" : "rgba(255, 73, 92, 0.35)"}`,
+              background: setupSignal.recommendedEntry.side === "LONG" ? "rgba(0, 245, 160, 0.08)" : "rgba(255, 73, 92, 0.08)",
+              border: `1px solid ${setupSignal.recommendedEntry.side === "LONG" ? "rgba(0, 245, 160, 0.35)" : "rgba(255, 73, 92, 0.35)"}`,
             }}>
-              <div style={{ fontWeight: 800, fontSize: "13px", color: setupSignal.recommendedStrikes.optionType === "CE" ? "#00F5A0" : "#FF495C" }}>
-                BUY {setupSignal.recommendedStrikes.instrument} {setupSignal.recommendedStrikes.primary.strike} {setupSignal.recommendedStrikes.optionType}{" "}
-                <span style={{ fontWeight: 600, fontSize: "10px", opacity: 0.8 }}>· {setupSignal.recommendedStrikes.primary.label}</span>
+              <div style={{ fontWeight: 800, fontSize: "13px", color: setupSignal.recommendedEntry.side === "LONG" ? "#00F5A0" : "#FF495C" }}>
+                {setupSignal.recommendedEntry.side} {setupSignal.recommendedEntry.symbol} @ ${setupSignal.recommendedEntry.entry.price.toFixed(2)}{" "}
+                <span style={{ fontWeight: 600, fontSize: "10px", opacity: 0.8 }}>· {setupSignal.recommendedEntry.entry.label}</span>
               </div>
-              <div style={{ fontSize: "9px", color: "#8E9BAE", marginTop: "1px" }}>{setupSignal.recommendedStrikes.primary.rationale}</div>
+              <div style={{ fontSize: "9px", color: "#8E9BAE", marginTop: "1px" }}>{setupSignal.recommendedEntry.entry.rationale}</div>
               <div style={{ fontSize: "9px", color: "#6B7A90", marginTop: "3px" }}>
-                Alt: {setupSignal.recommendedStrikes.alternates.map((a) => `${a.strike} ${setupSignal.recommendedStrikes?.optionType} (${a.label})`).join(" · ")}
+                STOP ${setupSignal.recommendedEntry.stop.price.toFixed(2)} ({setupSignal.recommendedEntry.stop.rationale}) · TARGET ${setupSignal.recommendedEntry.target.price.toFixed(2)} ({setupSignal.recommendedEntry.target.rationale})
               </div>
             </div>
           )}
@@ -3064,12 +3044,12 @@ export const TradingViewChart: React.FC<ChartProps> = ({
               <div style={{ display: "flex", gap: "10px", fontSize: "9px", marginTop: "3px", color: "#8E9BAE" }}>
                 <span>
                   EQUITY{" "}
-                  <span style={{ fontWeight: 700, color: "#FFFFFF" }}>₹{paperEquity(paperAccount).toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
+                  <span style={{ fontWeight: 700, color: "#FFFFFF" }}>${paperEquity(paperAccount).toLocaleString("en-US", { minimumFractionDigits: 2 })}</span>
                 </span>
                 <span>
                   REALIZED{" "}
                   <span style={{ fontWeight: 700, color: realizedPnl(paperAccount) >= 0 ? "#00F5A0" : "#FF495C" }}>
-                    {realizedPnl(paperAccount) >= 0 ? "+" : ""}₹{realizedPnl(paperAccount).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                    {realizedPnl(paperAccount) >= 0 ? "+" : ""}${realizedPnl(paperAccount).toLocaleString("en-US", { minimumFractionDigits: 2 })}
                   </span>
                 </span>
                 <span>
@@ -3078,13 +3058,13 @@ export const TradingViewChart: React.FC<ChartProps> = ({
               </div>
               {paperAccount.open ? (
                 <div style={{ marginTop: "3px", fontSize: "9px", color: "#FFFFFF" }}>
-                  OPEN {paperAccount.open.optionType} {paperAccount.open.strike} @ ₹{paperAccount.open.entryPremium}
-                  {paperAccount.open.estimatedEntry ? " (EST)" : ""} → ₹{paperAccount.open.lastPremium}{" "}
-                  <span style={{ color: paperAccount.open.lastPremium >= paperAccount.open.entryPremium ? "#00F5A0" : "#FF495C" }}>
-                    ({(((paperAccount.open.lastPremium - paperAccount.open.entryPremium) / paperAccount.open.entryPremium) * 100).toFixed(1)}%)
+                  OPEN {paperAccount.open.side} {paperAccount.open.symbol.toUpperCase()} × {paperAccount.open.qty} @ ${paperAccount.open.entryPrice.toFixed(2)}
+                  {paperAccount.open.estimatedEntry ? " (EST)" : ""} → ${paperAccount.open.lastPrice.toFixed(2)}{" "}
+                  <span style={{ color: paperAccount.open.lastPrice >= paperAccount.open.entryPrice ? (paperAccount.open.side === "LONG" ? "#00F5A0" : "#FF495C") : (paperAccount.open.side === "LONG" ? "#FF495C" : "#00F5A0") }}>
+                    ({(((paperAccount.open.lastPrice - paperAccount.open.entryPrice) / paperAccount.open.entryPrice) * 100 * (paperAccount.open.side === "LONG" ? 1 : -1)).toFixed(1)}%)
                   </span>
                   <div style={{ color: "#6B7A90" }}>
-                    STOP ₹{paperAccount.open.stopPremium} · TGT ₹{paperAccount.open.targetPremium} · MAE {paperAccount.open.maePct}% · MFE {paperAccount.open.mfePct}%
+                    STOP ${paperAccount.open.stopPrice.toFixed(2)} · TGT ${paperAccount.open.targetPrice.toFixed(2)} · MAE {paperAccount.open.maePct}% · MFE {paperAccount.open.mfePct}%
                   </div>
                 </div>
               ) : (

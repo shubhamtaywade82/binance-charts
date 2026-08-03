@@ -1,26 +1,15 @@
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState } from "react";
 import {
   Activity,
-  AlertTriangle,
-  ArrowDown,
-  ArrowUp,
   BarChart2,
-  CheckCircle2,
-  ChevronLeft,
-  ChevronRight,
   Clock,
-  Database,
   DollarSign,
   Layers,
   Lock,
-  Menu,
   PanelLeftClose,
   PanelLeftOpen,
   PanelRightClose,
   PanelRightOpen,
-  RefreshCw,
-  Shield,
-  Sliders,
   TrendingUp,
   Zap,
 } from "lucide-react";
@@ -42,28 +31,14 @@ interface TickData {
 }
 
 interface SessionInfo {
-  istDate: string;
-  istTime: string;
-  isTradingDay: boolean;
-  sessionState: string;
+  isOpen: boolean;
+  exchange: string;
+  marketType: string;
   lastCompletedTradingDay: string;
 }
 
-const SYMBOL_ID_MAP: Record<string, { id: string; segment: string; instrument: string }> = {
-  btcusdt: { id: "BTCUSDT", segment: "SPOT", instrument: "CRYPTO" },
-  ethusdt: { id: "ETHUSDT", segment: "SPOT", instrument: "CRYPTO" },
-  solusdt: { id: "SOLUSDT", segment: "SPOT", instrument: "CRYPTO" },
-  bnbusdt: { id: "BNBUSDT", segment: "SPOT", instrument: "CRYPTO" },
-  xrpusdt: { id: "XRPUSDT", segment: "SPOT", instrument: "CRYPTO" },
-  dogeusdt: { id: "DOGEUSDT", segment: "SPOT", instrument: "CRYPTO" },
-  adausdt: { id: "ADAUSDT", segment: "SPOT", instrument: "CRYPTO" },
-  avaxusdt: { id: "AVAXUSDT", segment: "SPOT", instrument: "CRYPTO" },
-  nearusdt: { id: "NEARUSDT", segment: "SPOT", instrument: "CRYPTO" },
-  linkusdt: { id: "LINKUSDT", segment: "SPOT", instrument: "CRYPTO" },
-};
-
 export function App() {
-  const [activeTab, setActiveTab] = useState<"terminal" | "options" | "expired" | "optdesk" | "bias" | "portfolio">((): any => {
+  const [activeTab, setActiveTab] = useState<"terminal" | "backtest" | "intel" | "bias" | "portfolio">((): any => {
     return (localStorage.getItem("binance_activeTab") as any) || "terminal";
   });
   const [selectedSymbol, setSelectedSymbol] = useState(() => {
@@ -118,248 +93,9 @@ export function App() {
   // Data states
   const [funds, setFunds] = useState<any>(null);
   const [bias, setBias] = useState<any>(null);
-  const [optionChain, setOptionChain] = useState<any>(null);
-  const [selectedExpiry, setSelectedExpiry] = useState<string>(() => {
-    return localStorage.getItem("dhan_selectedExpiry") || "";
-  });
-
-  useEffect(() => {
-    if (selectedExpiry) {
-      localStorage.setItem("dhan_selectedExpiry", selectedExpiry);
-    }
-  }, [selectedExpiry]);
-
-  const [expiredResult, setExpiredResult] = useState<any>(null);
-  const [expiredViewMode, setExpiredViewMode] = useState<"CHART" | "TABLE" | "SPLIT">("CHART");
-  const [showRawJson, setShowRawJson] = useState(false);
   const [ledger, setLedger] = useState<any>(null);
   const [killSwitchActive, setKillSwitchActive] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [optionError, setOptionError] = useState<string | null>(null);
-
-  // Expired options form inputs (Defaults to 35 days for a full 1 month historical series)
-  const [expiredForm, setExpiredForm] = useState({
-    securityId: "13",
-    exchangeSegment: "NSE_FNO",
-    instrument: "OPTIDX",
-    expiryFlag: "WEEK",
-    expiryCode: "1",
-    strike: "ATM",
-    drvOptionType: "CALL",
-    interval: "1",
-    requiredData: ["open", "high", "low", "close", "volume", "oi"],
-    fromDate: "2026-06-24",
-    toDate: "2026-07-28",
-  });
-
-  const setExpiredDatePreset = (days: number) => {
-    const to = expiredForm.toDate || session?.lastCompletedTradingDay || new Date().toISOString().split("T")[0];
-    const toDateObj = new Date(to);
-    const fromDateObj = new Date(toDateObj.getTime() - days * 24 * 60 * 60 * 1000);
-    const from = fromDateObj.toISOString().split("T")[0];
-    setExpiredForm((prev) => ({
-      ...prev,
-      fromDate: from,
-      toDate: to,
-    }));
-  };
-
-  // Compute parsed candle array for Expired Options Rolling Chart
-  const expiredCandles = useMemo(() => {
-    if (!expiredResult) return [];
-
-    // Extract root data from response wrapper
-    const root = expiredResult.data !== undefined ? expiredResult.data : expiredResult;
-    let target = root.data !== undefined && root.data !== null ? root.data : root;
-
-    // Handle nested option branches if present
-    if (target && (target.ce || target.pe)) {
-      target = expiredForm.drvOptionType === "CALL" ? (target.ce || target) : (target.pe || target);
-    }
-
-    if (!target) return [];
-
-    const candles: any[] = [];
-
-    // Case 1: Column-wise arrays (DhanHQ API standard for rolling options)
-    const timeArray = target.start_Time || target.timestamp || target.time || target.t;
-    const closeArray = target.close || target.c;
-    const openArray = target.open || target.o;
-    const highArray = target.high || target.h;
-    const lowArray = target.low || target.l;
-    const volumeArray = target.volume || target.v;
-    const oiArray = target.oi;
-    const spotArray = target.spot;
-
-    if (Array.isArray(closeArray) && closeArray.length > 0) {
-      for (let i = 0; i < closeArray.length; i++) {
-        const closeVal = Number(closeArray[i]);
-        if (isNaN(closeVal) || closeVal === 0) continue;
-
-        let rawTime = timeArray ? timeArray[i] : undefined;
-        let timeNum: number;
-        if (typeof rawTime === "number") {
-          timeNum = rawTime > 1e11 ? Math.floor(rawTime / 1000) : rawTime;
-        } else if (typeof rawTime === "string") {
-          const parsed = Date.parse(rawTime);
-          timeNum = !isNaN(parsed) ? Math.floor(parsed / 1000) : Math.floor(Date.now() / 1000);
-        } else {
-          timeNum = Math.floor(Date.now() / 1000) - (closeArray.length - i) * (Number(expiredForm.interval) || 15) * 60;
-        }
-
-        const openVal = openArray && openArray[i] !== undefined ? Number(openArray[i]) : closeVal;
-        const highVal = highArray && highArray[i] !== undefined ? Number(highArray[i]) : Math.max(openVal, closeVal);
-        const lowVal = lowArray && lowArray[i] !== undefined ? Number(lowArray[i]) : Math.min(openVal, closeVal);
-        const volVal = volumeArray && volumeArray[i] !== undefined ? Number(volumeArray[i]) : 0;
-        const oiVal = oiArray && oiArray[i] !== undefined ? Number(oiArray[i]) : 0;
-        const spotVal = spotArray && spotArray[i] !== undefined ? Number(spotArray[i]) : 0;
-
-        candles.push({
-          time: timeNum,
-          open: openVal,
-          high: highVal,
-          low: lowVal,
-          close: closeVal,
-          volume: volVal,
-          oi: oiVal,
-          spot: spotVal,
-        });
-      }
-    } else if (Array.isArray(target)) {
-      // Case 2: Row-wise candle objects
-      for (const item of target) {
-        if (!item || typeof item !== "object") continue;
-        const closeVal = Number(item.close ?? item.c);
-        if (isNaN(closeVal) || closeVal === 0) continue;
-
-        let rawTime = item.timestamp ?? item.start_Time ?? item.time ?? item.t;
-        let timeNum: number;
-        if (typeof rawTime === "number") {
-          timeNum = rawTime > 1e11 ? Math.floor(rawTime / 1000) : rawTime;
-        } else if (typeof rawTime === "string") {
-          const parsed = Date.parse(rawTime);
-          timeNum = !isNaN(parsed) ? Math.floor(parsed / 1000) : Math.floor(Date.now() / 1000);
-        } else {
-          timeNum = Math.floor(Date.now() / 1000);
-        }
-
-        const openVal = Number(item.open ?? item.o ?? closeVal);
-        const highVal = Number(item.high ?? item.h ?? Math.max(openVal, closeVal));
-        const lowVal = Number(item.low ?? item.l ?? Math.min(openVal, closeVal));
-        const volVal = Number(item.volume ?? item.v ?? 0);
-        const oiVal = Number(item.oi ?? 0);
-        const spotVal = Number(item.spot ?? 0);
-
-        candles.push({
-          time: timeNum,
-          open: openVal,
-          high: highVal,
-          low: lowVal,
-          close: closeVal,
-          volume: volVal,
-          oi: oiVal,
-          spot: spotVal,
-        });
-      }
-    }
-
-    // Deduplicate timestamps & sort ascending
-    const uniqueMap = new Map<number, any>();
-    for (const c of candles) {
-      uniqueMap.set(c.time, c);
-    }
-    return Array.from(uniqueMap.values()).sort((a, b) => a.time - b.time);
-  }, [expiredResult, expiredForm.drvOptionType, expiredForm.interval]);
-
-  // Compute Spot Price, ATM Strike, Target Strike, and Moneyness
-  const scripSpotInfo = useMemo(() => {
-    const sym = selectedSymbol.toLowerCase();
-    let spot = tick?.ltp || optionChain?.spotPrice || 0;
-    if (!spot) {
-      if (sym === "nifty") spot = 24262.70;
-      else if (sym === "banknifty") spot = 56891.95;
-      else if (sym === "sensex") spot = 77652.95;
-      else if (sym === "reliance") spot = 1285.50;
-      else if (sym === "hdfcbank") spot = 750.50;
-      else if (sym === "tcs") spot = 4250.00;
-      else if (sym === "infy") spot = 1850.00;
-      else spot = 24262.70;
-    }
-
-    let step = 50;
-    if (sym === "banknifty" || sym === "sensex") step = 100;
-    else if (sym === "reliance" || sym === "tcs") step = 20;
-    else if (sym === "hdfcbank" || sym === "infy") step = 10;
-
-    const atmStrike = Math.round(spot / step) * step;
-
-    let calculatedStrike = atmStrike;
-    let offset = 0;
-    const strInput = (expiredForm.strike || "ATM").toUpperCase().trim();
-
-    if (strInput.startsWith("ATM")) {
-      const match = strInput.match(/ATM([+-]?\d+)?/);
-      if (match && match[1]) {
-        offset = parseInt(match[1], 10) || 0;
-      }
-      calculatedStrike = atmStrike + offset * step;
-    } else {
-      const parsedNum = parseFloat(strInput);
-      if (!isNaN(parsedNum) && parsedNum > 0) {
-        calculatedStrike = parsedNum;
-        offset = Math.round((parsedNum - atmStrike) / step);
-      }
-    }
-
-    const optionType = expiredForm.drvOptionType;
-    let moneynessTag = "ATM (At-The-Money)";
-    if (calculatedStrike < atmStrike) {
-      moneynessTag = optionType === "CALL" ? "ITM (In-The-Money)" : "OTM (Out-Of-The-Money)";
-    } else if (calculatedStrike > atmStrike) {
-      moneynessTag = optionType === "CALL" ? "OTM (Out-Of-The-Money)" : "ITM (In-The-Money)";
-    }
-
-    const diffFromSpot = calculatedStrike - spot;
-    const diffPct = spot > 0 ? (diffFromSpot / spot) * 100 : 0;
-
-    return {
-      spot,
-      step,
-      atmStrike,
-      calculatedStrike,
-      offset,
-      moneynessTag,
-      diffFromSpot,
-      diffPct,
-    };
-  }, [selectedSymbol, tick, optionChain, expiredForm.strike, expiredForm.drvOptionType]);
-
-  // Dynamic sync expired options parameters when selectedSymbol or session updates
-  useEffect(() => {
-    const config = SYMBOL_ID_MAP[selectedSymbol.toLowerCase()];
-    if (config) {
-      setExpiredForm((prev) => ({
-        ...prev,
-        securityId: config.id,
-        exchangeSegment: config.segment,
-        instrument: config.instrument === "INDEX" ? "OPTIDX" : config.instrument,
-      }));
-    }
-  }, [selectedSymbol]);
-
-  useEffect(() => {
-    if (session?.lastCompletedTradingDay) {
-      const to = session.lastCompletedTradingDay;
-      const toDateObj = new Date(to);
-      const fromDateObj = new Date(toDateObj.getTime() - 35 * 24 * 60 * 60 * 1000);
-      const from = fromDateObj.toISOString().split("T")[0];
-      setExpiredForm((prev) => ({
-        ...prev,
-        toDate: to,
-        fromDate: from,
-      }));
-    }
-  }, [session]);
 
   // 1. Poll Session Info & Connect WebSocket
   useEffect(() => {
@@ -422,35 +158,14 @@ export function App() {
     };
   }, [selectedSymbol]);
 
-  // Fetch tab-specific data with proactive auto-fetch for Option Chain, Expired Options, Bias & Portfolio
+  // Fetch tab-specific data on demand (Bias & Portfolio)
   useEffect(() => {
-    let timer: any = null;
-
     if (activeTab === "bias") {
       fetchBias();
-    } else if (activeTab === "options") {
-      fetchOptionChain();
-      timer = setInterval(fetchOptionChain, 3000);
-    } else if (activeTab === "expired") {
-      handleFetchExpired();
     } else if (activeTab === "portfolio") {
       fetchPortfolioAndLedger();
     }
-
-    return () => {
-      if (timer) clearInterval(timer);
-    };
-  }, [
-    activeTab,
-    selectedSymbol,
-    selectedExpiry,
-    expiredForm.securityId,
-    expiredForm.fromDate,
-    expiredForm.toDate,
-    expiredForm.strike,
-    expiredForm.drvOptionType,
-    expiredForm.expiryFlag,
-  ]);
+  }, [activeTab, selectedSymbol]);
 
   const fetchBias = async () => {
     setLoading(true);
@@ -459,31 +174,6 @@ export function App() {
       const json = await res.json();
       if (json.data) setBias(json.data);
     } catch (e) {
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const fetchOptionChain = async () => {
-    setLoading(true);
-    setOptionError(null);
-    try {
-      const url = selectedExpiry
-        ? `/api/option-chain?symbol=${selectedSymbol}&expiry=${selectedExpiry}`
-        : `/api/option-chain?symbol=${selectedSymbol}`;
-      const res = await fetch(url);
-      const json = await res.json();
-
-      if (!res.ok || json.error) {
-        throw new Error(json.error || json.details?.errorMessage || "Failed to load option chain");
-      }
-
-      setOptionChain(json);
-      if (json.expiries && json.expiries.length > 0 && !selectedExpiry) {
-        setSelectedExpiry(json.expiry || json.expiries[0]);
-      }
-    } catch (e: any) {
-      setOptionError(e.message);
     } finally {
       setLoading(false);
     }
@@ -511,23 +201,6 @@ export function App() {
     }
   };
 
-  const handleFetchExpired = async () => {
-    setLoading(true);
-    try {
-      const res = await fetch("/api/charts/expired-options", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(expiredForm),
-      });
-      const json = await res.json();
-      setExpiredResult(json);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const toggleKillSwitch = async () => {
     const nextState = killSwitchActive ? "DEACTIVATE" : "ACTIVATE";
     try {
@@ -545,30 +218,8 @@ export function App() {
     }
   };
 
-  // Session badge color helper
-  const getSessionBadge = () => {
-    const state = session?.sessionState || "IN_SESSION";
-    if (state === "IN_SESSION") return { text: "LIVE SESSION", class: "bg-green-glow" };
-    if (state === "PRE_MARKET") return { text: "PRE-MARKET", class: "bg-cyan-glow" };
-    return { text: "MARKET CLOSED", class: "bg-red-glow" };
-  };
-
-  const badge = getSessionBadge();
-
-  // Compute PCR (Put-Call Ratio) for Option Chain
-  const computePcr = () => {
-    if (!optionChain?.chain?.strikes) return null;
-    let callOiSum = 0;
-    let putOiSum = 0;
-    optionChain.chain.strikes.forEach((s: any) => {
-      callOiSum += s.call?.oi || 0;
-      putOiSum += s.put?.oi || 0;
-    });
-    const pcr = callOiSum > 0 ? (putOiSum / callOiSum).toFixed(2) : "1.00";
-    return { callOiSum, putOiSum, pcr };
-  };
-
-  const pcrStats = computePcr();
+  // Session badge — Binance USD-M futures trades 24/7
+  const badge = { text: "LIVE 24/7 MARKET", class: "bg-green-glow" };
 
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", background: "var(--bg-primary)" }}>
@@ -602,10 +253,7 @@ export function App() {
             {["btcusdt", "ethusdt", "solusdt", "bnbusdt", "xrpusdt", "dogeusdt"].map((sym) => (
               <button
                 key={sym}
-                onClick={() => {
-                  setSelectedSymbol(sym);
-                  setSelectedExpiry("");
-                }}
+                onClick={() => setSelectedSymbol(sym)}
                 style={{
                   background: selectedSymbol === sym ? "var(--bg-card)" : "transparent",
                   color: selectedSymbol === sym ? "var(--accent-cyan)" : "var(--text-secondary)",
@@ -631,7 +279,7 @@ export function App() {
             <Clock size={13} />
             <span>{badge.text}</span>
             <span style={{ fontSize: "10px", opacity: 0.8 }} className="mono">
-              ({session?.istTime || "14:57 IST"})
+              ({session?.marketType || "CRYPTO_FUTURES_24X7"} · {new Date().toISOString().slice(11, 16)} UTC)
             </span>
           </div>
 
@@ -850,21 +498,21 @@ export function App() {
               {funds && (
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "16px" }}>
                   <div className="glass-card" style={{ padding: "16px" }}>
-                    <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>AVAILABLE BALANCE</span>
+                    <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>AVAILABLE MARGIN</span>
                     <div style={{ fontSize: "20px", fontWeight: 700, color: "var(--accent-green)" }} className="mono">
-                      ₹{funds.availabelBalance ? Number(funds.availabelBalance).toLocaleString("en-IN") : "0.00"}
+                      ${funds.availMargin ? Number(funds.availMargin).toLocaleString("en-US", { minimumFractionDigits: 2 }) : "0.00"} <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>USDT</span>
                     </div>
                   </div>
                   <div className="glass-card" style={{ padding: "16px" }}>
-                    <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>SOD LIMIT</span>
+                    <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>USED MARGIN</span>
                     <div style={{ fontSize: "20px", fontWeight: 700, color: "var(--accent-cyan)" }} className="mono">
-                      ₹{funds.sodLimit ? Number(funds.sodLimit).toLocaleString("en-IN") : "0.00"}
+                      ${funds.usedMargin ? Number(funds.usedMargin).toLocaleString("en-US", { minimumFractionDigits: 2 }) : "0.00"} <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>USDT</span>
                     </div>
                   </div>
                   <div className="glass-card" style={{ padding: "16px" }}>
-                    <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>COLLATERAL AMOUNT</span>
-                    <div style={{ fontSize: "20px", fontWeight: 700, color: "var(--accent-yellow)" }} className="mono">
-                      ₹{funds.collateralAmount ? Number(funds.collateralAmount).toLocaleString("en-IN") : "0.00"}
+                    <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>UNREALIZED P&L</span>
+                    <div style={{ fontSize: "20px", fontWeight: 700, color: (funds.unrealizedPnl || 0) >= 0 ? "var(--accent-green)" : "var(--accent-red)" }} className="mono">
+                      {Number(funds.unrealizedPnl || 0) >= 0 ? "+" : ""}${Number(funds.unrealizedPnl || 0).toLocaleString("en-US", { minimumFractionDigits: 2 })} <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>USDT</span>
                     </div>
                   </div>
                 </div>

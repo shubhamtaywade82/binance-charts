@@ -1,4 +1,4 @@
-export type PaperOptionType = "CE" | "PE";
+export type PaperSide = "LONG" | "SHORT";
 export type PaperExitReason = "STOP" | "TARGET" | "EOD" | "FLIP" | "MANUAL";
 
 export interface PaperSettings {
@@ -9,15 +9,14 @@ export interface PaperSettings {
 export interface PaperPosition {
   id: string;
   symbol: string;
-  optionType: PaperOptionType;
-  strike: number;
-  lotSize: number;
+  side: PaperSide;
+  qty: number;
   entryTime: number;
-  entryPremium: number;
-  stopPremium: number;
-  targetPremium: number;
+  entryPrice: number;
+  stopPrice: number;
+  targetPrice: number;
   estimatedEntry: boolean;
-  lastPremium: number;
+  lastPrice: number;
   lastTime: number;
   maePct: number;
   mfePct: number;
@@ -25,7 +24,7 @@ export interface PaperPosition {
 
 export interface PaperTrade extends PaperPosition {
   exitTime: number;
-  exitPremium: number;
+  exitPrice: number;
   exitReason: PaperExitReason;
   pnl: number;
   returnPct: number;
@@ -42,30 +41,19 @@ export interface PaperAccount {
 }
 
 export const PAPER_START_EQUITY = 100000;
-export const DEFAULT_PAPER_SETTINGS: PaperSettings = { stopPct: 20, targetPct: 40 };
+export const PAPER_POSITION_FRACTION = 0.1;
+export const DEFAULT_PAPER_SETTINGS: PaperSettings = { stopPct: 2, targetPct: 4 };
 
-export function lotSizeForSymbol(symbol: string): number {
-  const key = (symbol || "").toUpperCase();
-  if (key.startsWith("BTC")) return 1;
-  if (key.startsWith("ETH")) return 1;
-  return 10;
+/** Quantity (base units) for a $10,000 notional position at the given entry price. */
+export function paperPositionQty(entryPrice: number): number {
+  if (entryPrice <= 0) return 0;
+  return Number(((PAPER_START_EQUITY * PAPER_POSITION_FRACTION) / entryPrice).toFixed(4));
 }
 
-/** Crude premium estimate (intrinsic + 0.5% time value) used when no live quote is available. */
-export function estimatePremium(spot: number, strike: number, optionType: PaperOptionType): number {
-  const intrinsic =
-    optionType === "CE" ? Math.max(0, spot - strike) : Math.max(0, strike - spot);
-  return Number((intrinsic + strike * 0.005).toFixed(2));
+/** Directional PnL per unit of price move: +1 for LONG, -1 for SHORT. */
+export function sideMultiplier(side: PaperSide): number {
+  return side === "LONG" ? 1 : -1;
 }
-
-/** Minutes elapsed since midnight UTC. */
-export function minutesToISt(ms: number): number {
-  const d = new Date(ms);
-  return (d.getUTCHours() * 60 + d.getUTCMinutes()) % 1440;
-}
-
-/** Session-end exit trigger: 23:55 UTC (never forced close on 24x7 market). */
-export const isSessionEndISt = (ms: number): boolean => false;
 
 export function createPaperAccount(symbol: string): PaperAccount {
   return {
@@ -79,63 +67,68 @@ export function createPaperAccount(symbol: string): PaperAccount {
   };
 }
 
+export function unrealizedPnl(acc: PaperAccount): number {
+  if (!acc.open) return 0;
+  const { side, qty, entryPrice, lastPrice } = acc.open;
+  return Number((sideMultiplier(side) * (lastPrice - entryPrice) * qty).toFixed(2));
+}
+
 export function paperEquity(acc: PaperAccount): number {
-  const openValue = acc.open ? acc.open.lastPremium * acc.open.lotSize : 0;
-  return acc.cash + openValue;
+  return Number((acc.cash + unrealizedPnl(acc)).toFixed(2));
 }
 
 export function realizedPnl(acc: PaperAccount): number {
-  return acc.closed.reduce((sum, t) => sum + t.pnl, 0);
+  return Number(acc.closed.reduce((sum, t) => sum + t.pnl, 0).toFixed(2));
 }
 
-/** Open a paper position (no-op when a position is already open). */
+/** Open a paper futures position (no-op when a position is already open). */
 export function openPaperPosition(
   acc: PaperAccount,
-  opts: { optionType: PaperOptionType; strike: number; entryPremium: number; estimatedEntry: boolean; now: number }
+  opts: { side: PaperSide; entryPrice: number; estimatedEntry: boolean; now: number }
 ): PaperAccount {
-  if (acc.open || opts.entryPremium <= 0) return acc;
+  if (acc.open || opts.entryPrice <= 0) return acc;
   const { stopPct, targetPct } = DEFAULT_PAPER_SETTINGS;
+  const mult = sideMultiplier(opts.side);
   const position: PaperPosition = {
-    id: `${acc.symbol}-${opts.optionType}-${opts.strike}-${opts.now}`,
+    id: `${acc.symbol}-${opts.side}-${opts.now}`,
     symbol: acc.symbol,
-    optionType: opts.optionType,
-    strike: opts.strike,
-    lotSize: lotSizeForSymbol(acc.symbol),
+    side: opts.side,
+    qty: paperPositionQty(opts.entryPrice),
     entryTime: opts.now,
-    entryPremium: opts.entryPremium,
-    stopPremium: Number((opts.entryPremium * (1 - stopPct / 100)).toFixed(2)),
-    targetPremium: Number((opts.entryPremium * (1 + targetPct / 100)).toFixed(2)),
+    entryPrice: opts.entryPrice,
+    stopPrice: Number((opts.entryPrice * (1 - mult * (stopPct / 100))).toFixed(2)),
+    targetPrice: Number((opts.entryPrice * (1 + mult * (targetPct / 100))).toFixed(2)),
     estimatedEntry: opts.estimatedEntry,
-    lastPremium: opts.entryPremium,
+    lastPrice: opts.entryPrice,
     lastTime: opts.now,
     maePct: 0,
     mfePct: 0,
   };
-  return { ...acc, cash: Number((acc.cash - opts.entryPremium * position.lotSize).toFixed(2)), open: position };
+  return { ...acc, open: position };
 }
 
-/** Close the open position at the given premium. */
+/** Close the open position at the given price. */
 export function closePaperPosition(
   acc: PaperAccount,
-  premium: number,
+  exitPrice: number,
   now: number,
   reason: PaperExitReason
 ): { acc: PaperAccount; trade: PaperTrade | null } {
   if (!acc.open) return { acc, trade: null };
   const open = acc.open;
-  const pnl = (premium - open.entryPremium) * open.lotSize;
+  const pnl = sideMultiplier(open.side) * (exitPrice - open.entryPrice) * open.qty;
   const trade: PaperTrade = {
     ...open,
     exitTime: now,
-    exitPremium: premium,
+    exitPrice,
     exitReason: reason,
     pnl: Number(pnl.toFixed(2)),
-    returnPct: Number((((premium - open.entryPremium) / open.entryPremium) * 100).toFixed(2)),
+    returnPct: Number((sideMultiplier(open.side) * ((exitPrice - open.entryPrice) / open.entryPrice) * 100).toFixed(2)),
   };
   return {
     acc: {
       ...acc,
-      cash: Number((acc.cash + premium * open.lotSize).toFixed(2)),
+      cash: Number((acc.cash + pnl).toFixed(2)),
       open: null,
       closed: [...acc.closed, trade],
       totalTrades: acc.totalTrades + 1,
@@ -151,24 +144,28 @@ export function closePaperPosition(
  */
 export function markPaperPosition(
   acc: PaperAccount,
-  premium: number,
+  price: number,
   now: number
 ): { acc: PaperAccount; trade: PaperTrade | null } {
-  if (!acc.open || premium <= 0) return { acc, trade: null };
+  if (!acc.open || price <= 0) return { acc, trade: null };
   const open = acc.open;
-  const returnPct = ((premium - open.entryPremium) / open.entryPremium) * 100;
+  const returnPct = sideMultiplier(open.side) * ((price - open.entryPrice) / open.entryPrice) * 100;
   const updated: PaperPosition = {
     ...open,
-    lastPremium: premium,
+    lastPrice: price,
     lastTime: now,
     maePct: Number(Math.min(open.maePct, returnPct).toFixed(2)),
     mfePct: Number(Math.max(open.mfePct, returnPct).toFixed(2)),
   };
-  if (premium <= updated.stopPremium) {
-    return closePaperPosition({ ...acc, open: updated }, premium, now, "STOP");
+  const stopped =
+    (open.side === "LONG" && price <= updated.stopPrice) || (open.side === "SHORT" && price >= updated.stopPrice);
+  const targeted =
+    (open.side === "LONG" && price >= updated.targetPrice) || (open.side === "SHORT" && price <= updated.targetPrice);
+  if (stopped) {
+    return closePaperPosition({ ...acc, open: updated }, price, now, "STOP");
   }
-  if (premium >= updated.targetPremium) {
-    return closePaperPosition({ ...acc, open: updated }, premium, now, "TARGET");
+  if (targeted) {
+    return closePaperPosition({ ...acc, open: updated }, price, now, "TARGET");
   }
   return { acc: { ...acc, open: updated }, trade: null };
 }
@@ -193,19 +190,4 @@ export function resetPaperAccount(symbol: string): PaperAccount {
     localStorage.removeItem(`binance_paper_${symbol.toLowerCase()}`);
   } catch {}
   return createPaperAccount(symbol);
-}
-
-/** Fetch the latest premium for a strike; falls back to an estimated premium when unavailable. */
-export async function fetchPaperQuote(
-  symbol: string,
-  strike: number,
-  optionType: PaperOptionType,
-  spot: number
-): Promise<{ premium: number; estimated: boolean }> {
-  try {
-    const res = await fetch(`/api/paper/quote?symbol=${encodeURIComponent(symbol)}&strike=${strike}&optionType=${optionType}`);
-    const json = await res.json();
-    if (json && json.premium > 0) return { premium: Number(json.premium), estimated: false };
-  } catch {}
-  return { premium: estimatePremium(spot, strike, optionType), estimated: true };
 }

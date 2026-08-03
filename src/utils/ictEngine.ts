@@ -57,10 +57,10 @@ interface SBAcc {
 }
 
 /**
- * Detect ICT Trading Sessions & Kill Zones across intraday candlestick data.
- * - Asia Session Range: 01:30 - 06:00 IST
- * - London Kill Zone: 12:30 - 15:30 IST
- * - New York Kill Zone: 17:30 - 20:30 IST
+ * Detect ICT Trading Sessions & Kill Zones across intraday candlestick data (UTC).
+ * - Asia Session Range: 20:00 - 00:30 UTC (overnight rollover)
+ * - London Kill Zone: 07:00 - 10:00 UTC
+ * - New York Kill Zone: 12:00 - 15:00 UTC
  */
 export function detectICTSessions(candles: CandleData[]): ICTSession[] {
   if (!candles || candles.length === 0) return [];
@@ -84,19 +84,18 @@ export function detectICTSessions(candles: CandleData[]): ICTSession[] {
 
   candles.forEach((candle) => {
     const date = new Date(candle.time * 1000);
-    const istMinutes = date.getUTCHours() * 60 + date.getUTCMinutes() + 330;
-    const normalizedMinutes = (istMinutes % 1440 + 1440) % 1440;
+    const utcMinutes = date.getUTCHours() * 60 + date.getUTCMinutes();
 
     let targetType: "ASIA" | "LONDON" | "NEW_YORK" | null = null;
     let name = "";
 
-    if (normalizedMinutes >= 90 && normalizedMinutes < 360) {
+    if (utcMinutes >= 1200 || utcMinutes < 30) {
       targetType = "ASIA";
       name = "ASIA RANGE";
-    } else if (normalizedMinutes >= 750 && normalizedMinutes < 930) {
+    } else if (utcMinutes >= 420 && utcMinutes < 600) {
       targetType = "LONDON";
       name = "LONDON KZ";
-    } else if (normalizedMinutes >= 1050 && normalizedMinutes < 1230) {
+    } else if (utcMinutes >= 720 && utcMinutes < 900) {
       targetType = "NEW_YORK";
       name = "NY KZ";
     }
@@ -122,10 +121,10 @@ export function detectICTSessions(candles: CandleData[]): ICTSession[] {
 }
 
 /**
- * Detect ICT Silver Bullet Windows across intraday candlestick data.
- * - London Open SB: 03:00 - 04:00 EST (13:30 - 14:30 IST)
- * - NY AM SB: 10:00 - 11:00 EST (19:30 - 20:30 IST)
- * - NY PM SB: 14:00 - 15:00 EST (23:30 - 00:30 IST)
+ * Detect ICT Silver Bullet Windows across intraday candlestick data (UTC).
+ * - London Open SB: 08:00 - 09:00 UTC
+ * - NY AM SB: 14:00 - 15:00 UTC
+ * - NY PM SB: 18:00 - 19:00 UTC
  */
 export function detectSilverBulletWindows(candles: CandleData[]): ICTSilverBulletWindow[] {
   if (!candles || candles.length === 0) return [];
@@ -147,19 +146,18 @@ export function detectSilverBulletWindows(candles: CandleData[]): ICTSilverBulle
 
   candles.forEach((candle) => {
     const date = new Date(candle.time * 1000);
-    const istMinutes = date.getUTCHours() * 60 + date.getUTCMinutes() + 330;
-    const normalizedMinutes = (istMinutes % 1440 + 1440) % 1440;
+    const utcMinutes = date.getUTCHours() * 60 + date.getUTCMinutes();
 
     let targetType: "LONDON_SB" | "NY_AM_SB" | "NY_PM_SB" | null = null;
     let name = "";
 
-    if (normalizedMinutes >= 810 && normalizedMinutes < 870) {
+    if (utcMinutes >= 480 && utcMinutes < 540) {
       targetType = "LONDON_SB";
       name = "SILVER BULLET (LDN 🎯)";
-    } else if (normalizedMinutes >= 1170 && normalizedMinutes < 1230) {
+    } else if (utcMinutes >= 840 && utcMinutes < 900) {
       targetType = "NY_AM_SB";
       name = "SILVER BULLET (NY AM 🎯)";
-    } else if (normalizedMinutes >= 1410 || normalizedMinutes < 30) {
+    } else if (utcMinutes >= 1080 && utcMinutes < 1140) {
       targetType = "NY_PM_SB";
       name = "SILVER BULLET (NY PM 🎯)";
     }
@@ -256,11 +254,10 @@ export function detectJudasSwings(candles: CandleData[]): ICTJudasSwing[] {
 
     postAsiaCandles.forEach((c) => {
       const date = new Date(c.time * 1000);
-      const istMinutes = date.getUTCHours() * 60 + date.getUTCMinutes() + 330;
-      const normalizedMinutes = (istMinutes % 1440 + 1440) % 1440;
+      const utcMinutes = date.getUTCHours() * 60 + date.getUTCMinutes();
 
-      // Only check during London Open (750m - 930m) or NY Open (1050m - 1230m)
-      const isKillZone = (normalizedMinutes >= 750 && normalizedMinutes < 930) || (normalizedMinutes >= 1050 && normalizedMinutes < 1230);
+      // Only check during London Open (07:00 - 10:00 UTC) or NY Open (12:00 - 15:00 UTC)
+      const isKillZone = (utcMinutes >= 420 && utcMinutes < 600) || (utcMinutes >= 720 && utcMinutes < 900);
       if (!isKillZone) return;
 
       // Bearish Judas (False Pump): Wick pierces above Asian High, but body closes below
@@ -315,39 +312,37 @@ export interface ICTAMDCycle {
 
 /**
  * Detect ICT AMD (Power of 3) Cycles: Accumulation → Manipulation → Distribution.
- * Uses intraday IST session windows:
- * - Accumulation: Asia Session Range (01:30 - 06:00 IST)
- * - Manipulation (Judas Swing): London Open false move (12:30 - 14:30 IST)
- * - Distribution: True directional move (14:30 - 20:30 IST)
+ * Uses intraday UTC session windows:
+ * - Accumulation: Asia Session Range (20:00 - 00:30 UTC)
+ * - Manipulation (Judas Swing): London Open false move (07:00 - 09:00 UTC)
+ * - Distribution: True directional move (09:00 - 15:00 UTC)
  */
 export function detectAMDCycles(candles: CandleData[]): ICTAMDCycle[] {
   if (!candles || candles.length < 20) return [];
 
   const cycles: ICTAMDCycle[] = [];
 
-  // Group candles by calendar day (IST-adjusted)
+  // Group candles by calendar day (UTC)
   const dayMap = new Map<string, CandleData[]>();
   candles.forEach((c) => {
     const date = new Date(c.time * 1000);
-    // IST = UTC+5:30, normalize to IST midnight
-    const istMs = date.getTime() + 330 * 60 * 1000;
-    const dayKey = new Date(istMs).toISOString().slice(0, 10);
+    const dayKey = date.toISOString().slice(0, 10);
     if (!dayMap.has(dayKey)) dayMap.set(dayKey, []);
     dayMap.get(dayKey)!.push(c);
   });
 
   dayMap.forEach((dayCandles, dayKey) => {
     const accumCandles = dayCandles.filter((c) => {
-      const istMins = toISTMinutes(c.time);
-      return istMins >= 90 && istMins < 360; // 01:30 - 06:00
+      const utcMins = toUTCMinutes(c.time);
+      return utcMins >= 1200 || utcMins < 30; // 20:00 - 00:30 (rollover)
     });
     const manipCandles = dayCandles.filter((c) => {
-      const istMins = toISTMinutes(c.time);
-      return istMins >= 750 && istMins < 870; // 12:30 - 14:30
+      const utcMins = toUTCMinutes(c.time);
+      return utcMins >= 420 && utcMins < 540; // 07:00 - 09:00
     });
     const distribCandles = dayCandles.filter((c) => {
-      const istMins = toISTMinutes(c.time);
-      return istMins >= 870 && istMins < 1230; // 14:30 - 20:30
+      const utcMins = toUTCMinutes(c.time);
+      return utcMins >= 540 && utcMins < 900; // 09:00 - 15:00
     });
 
     if (accumCandles.length < 2 || manipCandles.length < 1 || distribCandles.length < 1) return;
@@ -402,8 +397,7 @@ export function detectAMDCycles(candles: CandleData[]): ICTAMDCycle[] {
   return cycles.sort((a, b) => a.accumStartTime - b.accumStartTime);
 }
 
-function toISTMinutes(unixSec: number): number {
+function toUTCMinutes(unixSec: number): number {
   const date = new Date(unixSec * 1000);
-  const istMins = date.getUTCHours() * 60 + date.getUTCMinutes() + 330;
-  return (istMins % 1440 + 1440) % 1440;
+  return date.getUTCHours() * 60 + date.getUTCMinutes();
 }

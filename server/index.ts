@@ -27,9 +27,9 @@ app.use("/api", router);
 
 WebSocketFeedService.attach(wss);
 
-MarketDataService.syncRealBinanceSpotPrices();
+MarketDataService.syncRealBinanceFuturesPrices();
 setInterval(() => {
-  MarketDataService.syncRealBinanceSpotPrices();
+  MarketDataService.syncRealBinanceFuturesPrices();
 }, 5000);
 
 const distPath = path.join(__dirname, "../dist");

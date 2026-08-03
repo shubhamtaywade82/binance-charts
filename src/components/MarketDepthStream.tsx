@@ -56,7 +56,7 @@ export const MarketDepthStream: React.FC<MarketDepthProps> = ({ bids = [], asks 
             BUYERS {bidQtyPct}% ({totalBidQty.toLocaleString("en-IN")} QTY)
           </span>
           <span style={{ color: "var(--text-muted)" }} className="mono">
-            SPREAD: ₹{spread.toFixed(2)}
+            SPREAD: ${spread.toFixed(2)}
           </span>
           <span style={{ color: "var(--accent-red)" }} className="mono">
             SELLERS {askQtyPct}% ({totalAskQty.toLocaleString("en-IN")} QTY)
