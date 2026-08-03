@@ -54,7 +54,7 @@ export const PositioningAnalyticsView: React.FC<{ symbol: string }> = ({ symbol 
 
         <div className="glass-card" style={{ padding: "16px", borderRadius: "8px" }}>
           <div style={{ fontSize: "11px", color: "var(--text-muted)" }}>LONG / SHORT RATIO</div>
-          <div style={{ fontSize: "22px", fontWeight 800, color: "#FFD700" }}>
+          <div style={{ fontSize: "22px", fontWeight: 800, color: "#FFD700" }}>
             {intel?.longShortRatio?.ratio || 1.18}
           </div>
           <div style={{ fontSize: "11px", color: "var(--text-secondary)", marginTop: "4px" }}>

@@ -41,7 +41,7 @@ app.get("*", (req, res) => {
   }
 });
 
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 3002;
 server.listen(PORT, () => {
   console.log(`🚀 Dedicated Binance Public Charts Backend Server running at http://localhost:${PORT}`);
   console.log(`📦 Powered by binance-client-ts`);

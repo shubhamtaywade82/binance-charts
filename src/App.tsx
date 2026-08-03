@@ -361,7 +361,7 @@ export function App() {
     }
   }, [session]);
 
-  // 1. Poll Session Info & Connect WebSocket directly to port 3001
+  // 1. Poll Session Info & Connect WebSocket
   useEffect(() => {
     const fetchSession = async () => {
       try {
