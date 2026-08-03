@@ -1833,7 +1833,7 @@ export const TradingViewChart: React.FC<ChartProps> = ({
     if (livePrice === undefined || livePrice === null || !seriesRef.current || !lastCandleValRef.current) return;
 
     targetPriceRef.current = livePrice;
-    targetVolumeRef.current = (lastCandleValRef.current?.volume || 5000) + Math.floor(Math.random() * 50);
+    targetVolumeRef.current = lastCandleValRef.current?.volume || 0;
 
     if (currentVisualPriceRef.current === null) {
       currentVisualPriceRef.current = livePrice;
