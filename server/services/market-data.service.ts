@@ -13,17 +13,18 @@ export interface SymbolConfig {
 }
 
 export class MarketDataService {
+  /** Seed values are zeros — real prices arrive from the 5s futures ticker sync before the UI subscribes. */
   public static SYMBOL_MAP: Record<string, SymbolConfig> = {
-    btcusdt: { id: "BTCUSDT", segment: "USDT-M", instrument: "PERPETUAL", name: "Bitcoin / USDT", basePrice: 95000.0, prevClose: 94200.0, dayVolume: 1540200300 },
-    ethusdt: { id: "ETHUSDT", segment: "USDT-M", instrument: "PERPETUAL", name: "Ethereum / USDT", basePrice: 3300.0, prevClose: 3260.0, dayVolume: 890400100 },
-    solusdt: { id: "SOLUSDT", segment: "USDT-M", instrument: "PERPETUAL", name: "Solana / USDT", basePrice: 185.5, prevClose: 181.0, dayVolume: 512000400 },
-    bnbusdt: { id: "BNBUSDT", segment: "USDT-M", instrument: "PERPETUAL", name: "BNB / USDT", basePrice: 650.0, prevClose: 642.5, dayVolume: 230100500 },
-    xrpusdt: { id: "XRPUSDT", segment: "USDT-M", instrument: "PERPETUAL", name: "XRP / USDT", basePrice: 2.45, prevClose: 2.38, dayVolume: 410200100 },
-    dogeusdt: { id: "DOGEUSDT", segment: "USDT-M", instrument: "PERPETUAL", name: "Dogecoin / USDT", basePrice: 0.345, prevClose: 0.332, dayVolume: 310500200 },
-    adausdt: { id: "ADAUSDT", segment: "USDT-M", instrument: "PERPETUAL", name: "Cardano / USDT", basePrice: 0.88, prevClose: 0.85, dayVolume: 120400300 },
-    avaxusdt: { id: "AVAXUSDT", segment: "USDT-M", instrument: "PERPETUAL", name: "Avalanche / USDT", basePrice: 34.5, prevClose: 33.8, dayVolume: 140300100 },
-    nearusdt: { id: "NEARUSDT", segment: "USDT-M", instrument: "PERPETUAL", name: "NEAR Protocol / USDT", basePrice: 6.45, prevClose: 6.25, dayVolume: 98000100 },
-    linkusdt: { id: "LINKUSDT", segment: "USDT-M", instrument: "PERPETUAL", name: "Chainlink / USDT", basePrice: 21.8, prevClose: 21.2, dayVolume: 105000400 },
+    btcusdt: { id: "BTCUSDT", segment: "USDT-M", instrument: "PERPETUAL", name: "Bitcoin / USDT", basePrice: 0, prevClose: 0, dayVolume: 0 },
+    ethusdt: { id: "ETHUSDT", segment: "USDT-M", instrument: "PERPETUAL", name: "Ethereum / USDT", basePrice: 0, prevClose: 0, dayVolume: 0 },
+    solusdt: { id: "SOLUSDT", segment: "USDT-M", instrument: "PERPETUAL", name: "Solana / USDT", basePrice: 0, prevClose: 0, dayVolume: 0 },
+    bnbusdt: { id: "BNBUSDT", segment: "USDT-M", instrument: "PERPETUAL", name: "BNB / USDT", basePrice: 0, prevClose: 0, dayVolume: 0 },
+    xrpusdt: { id: "XRPUSDT", segment: "USDT-M", instrument: "PERPETUAL", name: "XRP / USDT", basePrice: 0, prevClose: 0, dayVolume: 0 },
+    dogeusdt: { id: "DOGEUSDT", segment: "USDT-M", instrument: "PERPETUAL", name: "Dogecoin / USDT", basePrice: 0, prevClose: 0, dayVolume: 0 },
+    adausdt: { id: "ADAUSDT", segment: "USDT-M", instrument: "PERPETUAL", name: "Cardano / USDT", basePrice: 0, prevClose: 0, dayVolume: 0 },
+    avaxusdt: { id: "AVAXUSDT", segment: "USDT-M", instrument: "PERPETUAL", name: "Avalanche / USDT", basePrice: 0, prevClose: 0, dayVolume: 0 },
+    nearusdt: { id: "NEARUSDT", segment: "USDT-M", instrument: "PERPETUAL", name: "NEAR Protocol / USDT", basePrice: 0, prevClose: 0, dayVolume: 0 },
+    linkusdt: { id: "LINKUSDT", segment: "USDT-M", instrument: "PERPETUAL", name: "Chainlink / USDT", basePrice: 0, prevClose: 0, dayVolume: 0 },
   };
 
   public static getSymbolConfig(symbolKey: string): SymbolConfig {

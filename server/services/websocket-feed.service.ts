@@ -1,5 +1,6 @@
 import { WebSocketServer, WebSocket } from "ws";
 import { MarketDataService } from "./market-data.service";
+import { BinanceClientService } from "./binance-client.service";
 import WebSocketClient from "ws";
 
 interface DepthLevel {
@@ -15,6 +16,7 @@ interface DepthSnapshot {
 
 export class WebSocketFeedService {
   private static binanceWsMap: Map<string, WebSocketClient> = new Map();
+  private static depthPollerMap: Map<string, NodeJS.Timeout> = new Map();
   private static depthBySymbol: Map<string, DepthSnapshot> = new Map();
 
   public static attach(wss: WebSocketServer): void {
@@ -69,24 +71,20 @@ export class WebSocketFeedService {
     });
   }
 
-  /** Single USD-M futures connection per symbol: real trade prints + top-20 order book. */
+  /** Per symbol: real trade-print WS connection + 1s REST order-book poll (coherent top-20 snapshot). */
   private static ensureBinanceFuturesStreams(symbolLower: string, onPrice: (p: number) => void): void {
     if (this.binanceWsMap.has(symbolLower)) return;
 
     try {
-      const streamUrl = `wss://fstream.binance.com/stream?streams=${symbolLower}@trade/${symbolLower}@depth20@100ms`;
+      const streamUrl = `wss://fstream.binance.com/ws/${symbolLower}@trade`;
       const bWs = new WebSocketClient(streamUrl);
 
       bWs.on("message", (data: any) => {
         try {
           const frame = JSON.parse(data.toString());
-          if (frame.stream === `${symbolLower}@trade` && frame.data?.p) {
+          if (frame.data?.p) {
             const price = parseFloat(frame.data.p);
             if (price > 0) onPrice(price);
-          } else if (frame.stream === `${symbolLower}@depth20@100ms` && frame.data) {
-            if (Array.isArray(frame.data.b) && Array.isArray(frame.data.a)) {
-              this.applyDepthUpdate(symbolLower, frame.data.b, frame.data.a);
-            }
           }
         } catch (e) {}
       });
@@ -99,25 +97,26 @@ export class WebSocketFeedService {
 
       this.binanceWsMap.set(symbolLower, bWs);
     } catch (e) {}
-  }
 
-  /** Futures depth streams emit incremental depthUpdate rows — merge them into a top-20 display book. */
-  private static applyDepthUpdate(symbolLower: string, bidRows: [string, string][], askRows: [string, string][]): void {
-    const prev = this.depthBySymbol.get(symbolLower) || { bids: [], asks: [] };
-    const merge = (levels: DepthLevel[], rows: [string, string][], ascending: boolean): DepthLevel[] => {
-      const map = new Map(levels.map((l) => [l.price, l]));
-      for (const [priceStr, qtyStr] of rows) {
-        const price = parseFloat(priceStr);
-        const qty = parseFloat(qtyStr);
-        if (qty > 0) map.set(price, { price, quantity: qty, orders: 1 });
-        else map.delete(price);
-      }
-      const sorted = [...map.values()].sort((a, b) => (ascending ? a.price - b.price : b.price - a.price));
-      return sorted.slice(0, 20);
+    const pollDepth = async () => {
+      try {
+        const client = BinanceClientService.getBinanceClient();
+        const snapshot = await client.futures.market.depth(symbolLower.toUpperCase(), 20);
+        const toLevels = (rows: { price: number; qty: number }[]): DepthLevel[] =>
+          rows.slice(0, 20).map((r) => ({
+            price: r.price,
+            quantity: r.qty,
+            orders: 1,
+          }));
+        this.depthBySymbol.set(symbolLower, {
+          bids: toLevels(snapshot.bids ?? []),
+          asks: toLevels(snapshot.asks ?? []),
+        });
+      } catch (e) {}
     };
-    this.depthBySymbol.set(symbolLower, {
-      bids: merge(prev.bids, bidRows, false),
-      asks: merge(prev.asks, askRows, true),
-    });
+
+    pollDepth();
+    const poller = setInterval(pollDepth, 1000);
+    this.depthPollerMap.set(symbolLower, poller);
   }
 }
