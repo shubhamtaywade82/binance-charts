@@ -243,7 +243,7 @@ export function App() {
             <div>
               <div style={{ fontSize: "16px", fontWeight: 700, letterSpacing: "-0.5px" }}>Binance Charts Pro Terminal</div>
               <div style={{ fontSize: "10px", color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
-                binance-client-ts <span style={{ color: "var(--accent-green)" }}>v0.1.0</span>
+                binance-client-ts <span style={{ color: "var(--accent-green)" }}>v2.1.0</span>
               </div>
             </div>
           </div>
