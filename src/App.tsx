@@ -26,9 +26,8 @@ import {
 } from "lucide-react";
 import { TradingViewChart } from "./components/TradingViewChart";
 import { MarketDepthStream } from "./components/MarketDepthStream";
-import { ExpiredOptionsTable } from "./components/ExpiredOptionsTable";
-import { OptionsResearchWorkbench } from "./components/research/OptionsResearchWorkbench";
-import { OptDeskExpiryArchivePage } from "./components/OptDeskExpiryArchivePage";
+import { FuturesBacktestWorkbench } from "./components/research/FuturesBacktestWorkbench";
+import { PositioningAnalyticsView } from "./components/research/PositioningAnalyticsView";
 
 interface TickData {
   symbol: string;
@@ -710,9 +709,8 @@ export function App() {
 
             {[
               { id: "terminal", label: "Real-Time Terminal", icon: BarChart2 },
-              { id: "options", label: "Option Chain & Greeks", icon: Layers },
-              { id: "expired", label: "Expired Research Workbench", icon: Database },
-              { id: "optdesk", label: "OPTDESK Expiry Archive", icon: Database },
+              { id: "backtest", label: "Futures Backtest Workbench", icon: Activity },
+              { id: "intel", label: "Futures Intel & OI", icon: Layers },
               { id: "bias", label: "Multi-Timeframe Bias", icon: TrendingUp },
               { id: "portfolio", label: "Account & Ledger", icon: DollarSign },
             ].map((t) => {
@@ -793,134 +791,14 @@ export function App() {
             </div>
           )}
 
-          {/* TAB 2: OPTION CHAIN & GREEKS */}
-          {activeTab === "options" && (
-            <div className="glass-panel" style={{ padding: "20px", display: "flex", flexDirection: "column", gap: "16px" }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <div>
-                  <div style={{ fontSize: "16px", fontWeight: 700 }}>
-                    Option Chain & Greeks Calculator ({selectedSymbol.toUpperCase()})
-                  </div>
-                  <div style={{ fontSize: "12px", color: "var(--text-muted)" }}>
-                    Spot Price: <span className="mono" style={{ color: "var(--accent-cyan)", fontWeight: 700 }}>₹{optionChain?.spotPrice ? Number(optionChain.spotPrice).toFixed(2) : "-"}</span>
-                  </div>
-                </div>
-
-                <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                  {optionChain?.expiries && (
-                    <select
-                      value={selectedExpiry}
-                      onChange={(e) => setSelectedExpiry(e.target.value)}
-                      style={{ padding: "6px 12px", background: "var(--bg-card)", border: "1px solid var(--border-color)", borderRadius: "6px", color: "white", fontSize: "12px" }}
-                    >
-                      {optionChain.expiries.map((exp: string) => (
-                        <option key={exp} value={exp}>Expiry: {exp}</option>
-                      ))}
-                    </select>
-                  )}
-
-                  <button onClick={fetchOptionChain} className="glass-card" style={{ padding: "6px 12px", color: "var(--accent-cyan)", fontSize: "12px", display: "flex", alignItems: "center", gap: "6px", cursor: "pointer" }}>
-                    <RefreshCw size={14} /> Refresh
-                  </button>
-                </div>
-              </div>
-
-              {/* PCR Stats */}
-              {pcrStats && (
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "12px" }}>
-                  <div className="glass-card" style={{ padding: "10px 16px" }}>
-                    <span style={{ fontSize: "10px", color: "var(--text-muted)" }}>PUT-CALL RATIO (PCR)</span>
-                    <div style={{ fontSize: "18px", fontWeight: 700, color: Number(pcrStats.pcr) >= 1 ? "var(--accent-green)" : "var(--accent-red)" }} className="mono">
-                      {pcrStats.pcr}
-                    </div>
-                  </div>
-                  <div className="glass-card" style={{ padding: "10px 16px" }}>
-                    <span style={{ fontSize: "10px", color: "var(--text-muted)" }}>TOTAL CALL OPEN INTEREST</span>
-                    <div style={{ fontSize: "18px", fontWeight: 700, color: "var(--accent-green)" }} className="mono">
-                      {pcrStats.callOiSum.toLocaleString("en-IN")}
-                    </div>
-                  </div>
-                  <div className="glass-card" style={{ padding: "10px 16px" }}>
-                    <span style={{ fontSize: "10px", color: "var(--text-muted)" }}>TOTAL PUT OPEN INTEREST</span>
-                    <div style={{ fontSize: "18px", fontWeight: 700, color: "var(--accent-red)" }} className="mono">
-                      {pcrStats.putOiSum.toLocaleString("en-IN")}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {optionError ? (
-                <div style={{ padding: "30px", textAlign: "center", color: "var(--accent-red)", background: "rgba(255,73,92,0.1)", borderRadius: "8px" }}>
-                  ⚠️ {optionError}
-                </div>
-              ) : loading ? (
-                <div style={{ padding: "40px", textAlign: "center", color: "var(--accent-cyan)" }}>Fetching Option Chain & Greeks...</div>
-              ) : optionChain?.chain?.strikes ? (
-                <div style={{ overflowX: "auto" }}>
-                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px" }}>
-                    <thead>
-                      <tr style={{ background: "rgba(255,255,255,0.03)", color: "var(--text-muted)", borderBottom: "1px solid var(--border-color)" }}>
-                        <th style={{ padding: "10px", textAlign: "left" }}>CALL OI</th>
-                        <th style={{ padding: "10px", textAlign: "left" }}>CALL IV</th>
-                        <th style={{ padding: "10px", textAlign: "left" }}>CALL LTP</th>
-                        <th style={{ padding: "10px", textAlign: "center", background: "rgba(0,229,255,0.1)", color: "var(--accent-cyan)" }}>STRIKE PRICE</th>
-                        <th style={{ padding: "10px", textAlign: "right" }}>PUT LTP</th>
-                        <th style={{ padding: "10px", textAlign: "right" }}>PUT IV</th>
-                        <th style={{ padding: "10px", textAlign: "right" }}>PUT OI</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {optionChain.chain.strikes.map((s: any, idx: number) => {
-                        const spot = tick?.ltp || optionChain.spotPrice || 0;
-                        const isAtm = Math.abs(s.strike - spot) < (selectedSymbol === "nifty" ? 35 : selectedSymbol === "sensex" ? 70 : 25);
-                        
-                        // Dynamic real-time premium tick adjustment based on spot movement
-                        const baseSpot = optionChain.spotPrice || spot;
-                        const spotDiff = spot - baseSpot;
-
-                        const rawCallLtp = s.call?.last_price || Math.max(1, (spot - s.strike) + 30);
-                        const rawPutLtp = s.put?.last_price || Math.max(1, (s.strike - spot) + 30);
-
-                        const callLtp = Math.max(0.5, Number((rawCallLtp + (spotDiff * 0.55)).toFixed(2)));
-                        const putLtp = Math.max(0.5, Number((rawPutLtp - (spotDiff * 0.55)).toFixed(2)));
-
-                        return (
-                          <tr
-                            key={idx}
-                            style={{
-                              borderBottom: "1px solid rgba(255,255,255,0.03)",
-                              background: isAtm ? "rgba(0, 245, 160, 0.08)" : "transparent",
-                            }}
-                          >
-                            <td style={{ padding: "10px", color: "var(--accent-green)" }} className="mono">{s.call?.oi ? s.call.oi.toLocaleString("en-IN") : "-"}</td>
-                            <td style={{ padding: "10px" }} className="mono">{s.call?.implied_volatility ? (s.call.implied_volatility * 100).toFixed(1) + "%" : "14.2%"}</td>
-                            <td style={{ padding: "10px", fontWeight: 700, color: "var(--accent-green)" }} className="mono">₹{callLtp.toFixed(2)}</td>
-                            <td style={{ padding: "10px", textAlign: "center", fontWeight: isAtm ? 800 : 600, color: isAtm ? "var(--accent-green)" : "white", background: isAtm ? "rgba(0,245,160,0.15)" : "rgba(0,229,255,0.05)" }} className="mono">
-                              {s.strike} {isAtm ? " (ATM)" : ""}
-                            </td>
-                            <td style={{ padding: "10px", textAlign: "right", fontWeight: 700, color: "var(--accent-red)" }} className="mono">₹{putLtp.toFixed(2)}</td>
-                            <td style={{ padding: "10px", textAlign: "right" }} className="mono">{s.put?.implied_volatility ? (s.put.implied_volatility * 100).toFixed(1) + "%" : "14.8%"}</td>
-                            <td style={{ padding: "10px", textAlign: "right", color: "var(--accent-red)" }} className="mono">{s.put?.oi ? s.put.oi.toLocaleString("en-IN") : "-"}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <div style={{ padding: "40px", textAlign: "center", color: "var(--text-muted)" }}>No option chain data available</div>
-              )}
-            </div>
+          {/* TAB 2: FUTURES BACKTEST WORKBENCH */}
+          {activeTab === "backtest" && (
+            <FuturesBacktestWorkbench symbol={selectedSymbol} />
           )}
 
-          {/* TAB 3: EXPIRED OPTIONS HISTORICAL RESEARCH WORKBENCH */}
-          {activeTab === "expired" && (
-            <OptionsResearchWorkbench />
-          )}
-
-          {/* TAB 3B: OPTDESK EXPIRY ARCHIVE DEDICATED PAGE */}
-          {activeTab === "optdesk" && (
-            <OptDeskExpiryArchivePage />
+          {/* TAB 3: FUTURES MARKET INTEL & OPEN INTEREST */}
+          {activeTab === "intel" && (
+            <PositioningAnalyticsView symbol={selectedSymbol} />
           )}
 
           {/* TAB 4: TECHNICAL ANALYSIS MULTI-TIMEFRAME BIAS ENGINE */}

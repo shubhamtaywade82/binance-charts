@@ -1,9 +1,7 @@
 import express, { Router, Request, Response } from "express";
 import { MarketDataService } from "./services/market-data.service";
-import { OptionChainService } from "./services/option-chain.service";
-import { OptionsAnalyticsService } from "./services/options-analytics.service";
-import { OptionsBacktestService } from "./services/options-backtest.service";
-import { SnapshotCacheService } from "./services/snapshot-cache.service";
+import { FuturesBacktestService } from "./services/futures-backtest.service";
+import { FuturesAnalyticsService } from "./services/futures-analytics.service";
 import { OrderExecutionService } from "./services/order-execution.service";
 import { RiskManagementService } from "./services/risk-management.service";
 import { TechnicalAnalysisService } from "./services/technical-analysis.service";
@@ -12,14 +10,14 @@ export const router = Router();
 router.use(express.json({ limit: "50mb" }));
 router.use(express.urlencoded({ limit: "50mb", extended: true }));
 
-// 1. Session Info (Binance 24/7 Crypto Market)
+// 1. Session Info (Binance 24/7 Crypto Futures Market)
 router.get("/session-info", (req: Request, res: Response) => {
   res.json({
     status: "success",
     session: {
       isOpen: true,
       exchange: "BINANCE",
-      marketType: "CRYPTO_24X7",
+      marketType: "CRYPTO_FUTURES_24X7",
       lastCompletedTradingDay: new Date().toISOString().split("T")[0],
     },
   });
@@ -45,27 +43,13 @@ router.get("/positions", async (req: Request, res: Response) => {
   }
 });
 
-// 4. Today's Orders
+// 4. Orders
 router.get("/orders", async (req: Request, res: Response) => {
   try {
     const data = await OrderExecutionService.listOrders();
     res.json({ status: "success", data });
   } catch (err: any) {
     res.status(err.status || 500).json({ error: err.message, details: err.details });
-  }
-});
-
-// 4b. Execute Multi-Leg Spread Strategy
-router.post("/orders/strategy-spread", async (req: Request, res: Response) => {
-  try {
-    const { buyLeg, sellLeg } = req.body;
-    if (!buyLeg || !sellLeg) {
-      return res.status(400).json({ error: "Both buyLeg and sellLeg are required for spread execution." });
-    }
-    const result = await OrderExecutionService.executeSpreadStrategy(buyLeg, sellLeg);
-    res.json(result);
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
   }
 });
 
@@ -118,103 +102,24 @@ router.get("/analysis/bias", async (req: Request, res: Response) => {
   }
 });
 
-// 8. Expired Options Historical Data & Analytics
-router.post("/charts/expired-options", async (req: Request, res: Response) => {
+// 8. Crypto Futures Quantitative Backtesting Endpoint
+router.post("/futures/backtest", async (req: Request, res: Response) => {
   try {
-    const result = await OptionChainService.fetchExpiredOptions(req.body);
-    res.json(result);
-  } catch (err: any) {
-    res.status(err.status || 500).json({ error: err.message, details: err.details });
-  }
-});
-
-router.post("/charts/expired-options-session", async (req: Request, res: Response) => {
-  try {
-    const snapshot = await SnapshotCacheService.getOrFetchSnapshot(req.body);
-    res.json(snapshot);
-  } catch (err: any) {
-    res.status(err.status || 500).json({ error: err.message, details: err.details });
-  }
-});
-
-router.post("/analytics/expired-options", async (req: Request, res: Response) => {
-  try {
-    let snapshot = req.body.snapshot;
-    if (!snapshot && (req.body.fromDate || req.body.symbol)) {
-      snapshot = await SnapshotCacheService.getOrFetchSnapshot(req.body);
-    }
-    const analytics = OptionsAnalyticsService.analyzeSession(snapshot);
-    res.json({ status: "success", data: analytics });
-  } catch (err: any) {
-    res.status(err.status || 500).json({ error: err.message, details: err.details });
-  }
-});
-
-router.post("/backtest/expired-options", async (req: Request, res: Response) => {
-  try {
-    let snapshot = req.body.snapshot;
-    if (!snapshot && (req.body.fromDate || req.body.symbol)) {
-      snapshot = await SnapshotCacheService.getOrFetchSnapshot(req.body);
-    }
-    const result = OptionsBacktestService.runBacktest(snapshot, req.body.config);
-    res.json({ status: "success", data: result });
-  } catch (err: any) {
-    res.status(err.status || 500).json({ error: err.message, details: err.details });
-  }
-});
-
-// Multi-Session Dataset Cache & Backtesting Endpoints
-router.get("/cache/sessions", (req: Request, res: Response) => {
-  try {
-    const sessions = SnapshotCacheService.listCachedSessions();
-    res.json({ status: "success", count: sessions.length, data: sessions });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-router.post("/cache/get-session", async (req: Request, res: Response) => {
-  try {
-    const snapshot = await SnapshotCacheService.getOrFetchSnapshot(req.body);
-    res.json(snapshot);
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-router.post("/backtest/multi-session", async (req: Request, res: Response) => {
-  try {
-    const result = await SnapshotCacheService.runMultiSessionBacktest(req.body);
+    const result = await FuturesBacktestService.runBacktest(req.body);
     res.json({ status: "success", data: result });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// 9. Option Chain & Live Quotes
-router.get("/option-chain", async (req: Request, res: Response) => {
+// 9. Crypto Futures Market Intelligence (Open Interest & Funding Rate)
+router.get("/futures/intel", async (req: Request, res: Response) => {
   try {
     const symbol = (req.query.symbol || "btcusdt").toString();
-    const expiry = req.query.expiry ? String(req.query.expiry) : undefined;
-    const payload = await OptionChainService.fetchOptionChain(symbol, expiry);
-    res.json(payload);
+    const data = await FuturesAnalyticsService.getFuturesMarketIntel(symbol);
+    res.json({ status: "success", data });
   } catch (err: any) {
-    res.status(err.status || 500).json({ error: err.message, details: err.details });
-  }
-});
-
-router.get("/paper/quote", async (req: Request, res: Response) => {
-  try {
-    const symbol = (req.query.symbol || "btcusdt").toString();
-    const strike = Number(req.query.strike);
-    const optionType = String(req.query.optionType || "CE").toUpperCase();
-    if (!strike || !["CE", "PE"].includes(optionType)) {
-      return res.status(400).json({ error: "strike and optionType (CE|PE) are required" });
-    }
-    const result = await OptionChainService.fetchLiveOptionQuote(symbol, strike, optionType);
-    res.json(result);
-  } catch (err: any) {
-    res.status(err.status || 500).json({ error: err.message, details: err.details });
+    res.status(500).json({ error: err.message });
   }
 });
 

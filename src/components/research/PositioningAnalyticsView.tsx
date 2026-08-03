@@ -1,119 +1,80 @@
-import React from "react";
+import React, { useState, useEffect } from "react";
 import { Activity, TrendingUp, TrendingDown, Layers, PieChart } from "lucide-react";
 
-interface PositioningAnalyticsViewProps {
-  snapshot: any;
-  analyticsData?: any;
-}
+export const PositioningAnalyticsView: React.FC<{ symbol: string }> = ({ symbol }) => {
+  const [intel, setIntel] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
 
-export const PositioningAnalyticsView: React.FC<PositioningAnalyticsViewProps> = ({
-  snapshot,
-  analyticsData,
-}) => {
-  const buildup = analyticsData?.buildupSummary || {
-    ce: { longBuildupPct: 18.0, shortBuildupPct: 47.0, shortCoveringPct: 21.0, longUnwindingPct: 14.0 },
-    pe: { longBuildupPct: 41.0, shortBuildupPct: 19.0, shortCoveringPct: 25.0, longUnwindingPct: 15.0 },
-  };
+  useEffect(() => {
+    const fetchIntel = async () => {
+      setLoading(true);
+      try {
+        const res = await fetch(`/api/futures/intel?symbol=${symbol}`);
+        const json = await res.json();
+        if (json.data) setIntel(json.data);
+      } catch (e) {
+        console.error("Intel fetch error:", e);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchIntel();
+  }, [symbol]);
+
+  const longPct = intel?.longShortRatio?.longPct || 54.2;
+  const shortPct = intel?.longShortRatio?.shortPct || 45.8;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-      {/* BUILDUP CLASSIFICATION DISTRIBUTION CARDS */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
-        {/* CALL SIDE BUILDUP */}
-        <div className="glass-card" style={{ padding: "20px", borderRadius: "12px", border: "1px solid var(--border-color)" }}>
-          <div style={{ fontSize: "14px", fontWeight: 800, color: "var(--accent-green)", marginBottom: "14px" }}>
-            📈 CALL SIDE (CE) POSITIONING & BUILDUP DISTRIBUTION
+    <div style={{ display: "flex", flexDirection: "column", gap: "16px", padding: "20px" }} className="glass-panel">
+      <div style={{ fontSize: "16px", fontWeight: 700, display: "flex", alignItems: "center", gap: "8px" }}>
+        <Activity size={20} color="var(--accent-cyan)" />
+        Futures Open Interest & Funding Rate Intel ({(symbol || "btcusdt").toUpperCase()})
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "14px" }}>
+        <div className="glass-card" style={{ padding: "16px", borderRadius: "8px" }}>
+          <div style={{ fontSize: "11px", color: "var(--text-muted)" }}>OPEN INTEREST (CONTRACTS)</div>
+          <div style={{ fontSize: "22px", fontWeight: 800, color: "var(--accent-cyan)" }}>
+            {intel ? intel.openInterest.toLocaleString() : "..."}
           </div>
-
-          <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-            <div>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", fontWeight: 700, marginBottom: "4px" }}>
-                <span style={{ color: "var(--accent-green)" }}>LONG BUILDUP (Price ↑, OI ↑)</span>
-                <span style={{ color: "white" }}>{buildup.ce.longBuildupPct}%</span>
-              </div>
-              <div style={{ height: "8px", background: "rgba(255,255,255,0.06)", borderRadius: "4px" }}>
-                <div style={{ width: `${buildup.ce.longBuildupPct}%`, height: "100%", background: "var(--accent-green)", borderRadius: "4px" }} />
-              </div>
-            </div>
-
-            <div>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", fontWeight: 700, marginBottom: "4px" }}>
-                <span style={{ color: "var(--accent-red)" }}>SHORT BUILDUP (Price ↓, OI ↑)</span>
-                <span style={{ color: "white" }}>{buildup.ce.shortBuildupPct}%</span>
-              </div>
-              <div style={{ height: "8px", background: "rgba(255,255,255,0.06)", borderRadius: "4px" }}>
-                <div style={{ width: `${buildup.ce.shortBuildupPct}%`, height: "100%", background: "var(--accent-red)", borderRadius: "4px" }} />
-              </div>
-            </div>
-
-            <div>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", fontWeight: 700, marginBottom: "4px" }}>
-                <span style={{ color: "var(--accent-cyan)" }}>SHORT COVERING (Price ↑, OI ↓)</span>
-                <span style={{ color: "white" }}>{buildup.ce.shortCoveringPct}%</span>
-              </div>
-              <div style={{ height: "8px", background: "rgba(255,255,255,0.06)", borderRadius: "4px" }}>
-                <div style={{ width: `${buildup.ce.shortCoveringPct}%`, height: "100%", background: "var(--accent-cyan)", borderRadius: "4px" }} />
-              </div>
-            </div>
-
-            <div>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", fontWeight: 700, marginBottom: "4px" }}>
-                <span style={{ color: "#FFB800" }}>LONG UNWINDING (Price ↓, OI ↓)</span>
-                <span style={{ color: "white" }}>{buildup.ce.longUnwindingPct}%</span>
-              </div>
-              <div style={{ height: "8px", background: "rgba(255,255,255,0.06)", borderRadius: "4px" }}>
-                <div style={{ width: `${buildup.ce.longUnwindingPct}%`, height: "100%", background: "#FFB800", borderRadius: "4px" }} />
-              </div>
-            </div>
+          <div style={{ fontSize: "11px", color: "var(--text-secondary)", marginTop: "4px" }}>
+            Notional: ${intel ? intel.openInterestUsdt.toLocaleString() : "0"} USDT
           </div>
         </div>
 
-        {/* PUT SIDE BUILDUP */}
-        <div className="glass-card" style={{ padding: "20px", borderRadius: "12px", border: "1px solid var(--border-color)" }}>
-          <div style={{ fontSize: "14px", fontWeight: 800, color: "var(--accent-red)", marginBottom: "14px" }}>
-            📉 PUT SIDE (PE) POSITIONING & BUILDUP DISTRIBUTION
+        <div className="glass-card" style={{ padding: "16px", borderRadius: "8px" }}>
+          <div style={{ fontSize: "11px", color: "var(--text-muted)" }}>FUNDING RATE (8h)</div>
+          <div style={{ fontSize: "22px", fontWeight: 800, color: (intel?.fundingRatePct || 0) >= 0 ? "var(--accent-green)" : "var(--accent-red)" }}>
+            {intel ? (intel.fundingRatePct >= 0 ? `+${intel.fundingRatePct}%` : `${intel.fundingRatePct}%`) : "..."}
           </div>
+          <div style={{ fontSize: "11px", color: "var(--text-secondary)", marginTop: "4px" }}>
+            {(intel?.fundingRatePct || 0) >= 0 ? "Longs pay Shorts" : "Shorts pay Longs"}
+          </div>
+        </div>
 
-          <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-            <div>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", fontWeight: 700, marginBottom: "4px" }}>
-                <span style={{ color: "var(--accent-green)" }}>LONG BUILDUP (Price ↑, OI ↑)</span>
-                <span style={{ color: "white" }}>{buildup.pe.longBuildupPct}%</span>
-              </div>
-              <div style={{ height: "8px", background: "rgba(255,255,255,0.06)", borderRadius: "4px" }}>
-                <div style={{ width: `${buildup.pe.longBuildupPct}%`, height: "100%", background: "var(--accent-green)", borderRadius: "4px" }} />
-              </div>
-            </div>
+        <div className="glass-card" style={{ padding: "16px", borderRadius: "8px" }}>
+          <div style={{ fontSize: "11px", color: "var(--text-muted)" }}>LONG / SHORT RATIO</div>
+          <div style={{ fontSize: "22px", fontWeight 800, color: "#FFD700" }}>
+            {intel?.longShortRatio?.ratio || 1.18}
+          </div>
+          <div style={{ fontSize: "11px", color: "var(--text-secondary)", marginTop: "4px" }}>
+            Accounts Ratio
+          </div>
+        </div>
+      </div>
 
-            <div>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", fontWeight: 700, marginBottom: "4px" }}>
-                <span style={{ color: "var(--accent-red)" }}>SHORT BUILDUP (Price ↓, OI ↑)</span>
-                <span style={{ color: "white" }}>{buildup.pe.shortBuildupPct}%</span>
-              </div>
-              <div style={{ height: "8px", background: "rgba(255,255,255,0.06)", borderRadius: "4px" }}>
-                <div style={{ width: `${buildup.pe.shortBuildupPct}%`, height: "100%", background: "var(--accent-red)", borderRadius: "4px" }} />
-              </div>
-            </div>
+      <div className="glass-card" style={{ padding: "20px", borderRadius: "10px" }}>
+        <div style={{ fontSize: "13px", fontWeight: 700, marginBottom: "12px" }}>
+          Market Sentiment & Positioning Distribution
+        </div>
 
-            <div>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", fontWeight: 700, marginBottom: "4px" }}>
-                <span style={{ color: "var(--accent-cyan)" }}>SHORT COVERING (Price ↑, OI ↓)</span>
-                <span style={{ color: "white" }}>{buildup.pe.shortCoveringPct}%</span>
-              </div>
-              <div style={{ height: "8px", background: "rgba(255,255,255,0.06)", borderRadius: "4px" }}>
-                <div style={{ width: `${buildup.pe.shortCoveringPct}%`, height: "100%", background: "var(--accent-cyan)", borderRadius: "4px" }} />
-              </div>
-            </div>
-
-            <div>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", fontWeight: 700, marginBottom: "4px" }}>
-                <span style={{ color: "#FFB800" }}>LONG UNWINDING (Price ↓, OI ↓)</span>
-                <span style={{ color: "white" }}>{buildup.pe.longUnwindingPct}%</span>
-              </div>
-              <div style={{ height: "8px", background: "rgba(255,255,255,0.06)", borderRadius: "4px" }}>
-                <div style={{ width: `${buildup.pe.longUnwindingPct}%`, height: "100%", background: "#FFB800", borderRadius: "4px" }} />
-              </div>
-            </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", fontWeight: 700 }}>
+            <span style={{ color: "var(--accent-green)" }}>LONGS: {longPct}%</span>
+            <span style={{ color: "var(--accent-red)" }}>SHORTS: {shortPct}%</span>
+          </div>
+          <div style={{ height: "10px", width: "100%", background: "var(--accent-red)", borderRadius: "5px", overflow: "hidden", display: "flex" }}>
+            <div style={{ width: `${longPct}%`, height: "100%", background: "var(--accent-green)" }} />
           </div>
         </div>
       </div>
