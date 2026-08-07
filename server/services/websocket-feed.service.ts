@@ -94,8 +94,9 @@ export class WebSocketFeedService {
       bWs.on("message", (data: any) => {
         try {
           const frame = JSON.parse(data.toString());
-          if (frame.data?.p) {
-            const price = parseFloat(frame.data.p);
+          const priceStr = frame.p || frame.data?.p || frame.c || frame.data?.c;
+          if (priceStr) {
+            const price = parseFloat(priceStr);
             if (price > 0) onPrice(price);
           }
         } catch (e) {}
