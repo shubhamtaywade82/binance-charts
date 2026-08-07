@@ -2763,21 +2763,21 @@ export const TradingViewChart: React.FC<ChartProps> = ({
         </div>
       )}
 
-      {/* Futures Setup Scanner Panel */}
+      {/* Futures Setup Scanner Panel - Positioned Top Right for High Visibility */}
       {showSetupScan && setupSignal && (
         <div style={{
           position: "absolute",
-          bottom: "10px",
-          left: "12px",
-          zIndex: 12,
-          pointerEvents: "none",
-          width: "300px",
-          background: "rgba(15, 19, 28, 0.92)",
+          top: "12px",
+          right: "75px",
+          zIndex: 20,
+          pointerEvents: "auto",
+          width: "290px",
+          background: "rgba(15, 19, 28, 0.94)",
           backdropFilter: "blur(12px)",
           WebkitBackdropFilter: "blur(12px)",
-          border: "1px solid rgba(255, 255, 255, 0.12)",
+          border: "1px solid rgba(255, 255, 255, 0.14)",
           borderRadius: "8px",
-          boxShadow: "0 8px 24px rgba(0, 0, 0, 0.5)",
+          boxShadow: "0 8px 24px rgba(0, 0, 0, 0.6)",
           padding: "8px 12px",
           fontFamily: "var(--font-mono)",
           fontSize: "10px",
