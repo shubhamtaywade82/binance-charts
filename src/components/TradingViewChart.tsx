@@ -2162,6 +2162,12 @@ export const TradingViewChart: React.FC<ChartProps> = ({
         chart.remove();
         chartRef.current = null;
       }
+      bidLineRef.current = null;
+      askLineRef.current = null;
+      targetBidRef.current = null;
+      currentVisualBidRef.current = null;
+      targetAskRef.current = null;
+      currentVisualAskRef.current = null;
     };
   }, [symbol, interval, showIndicators, customCandles]);
 
@@ -2330,7 +2336,8 @@ export const TradingViewChart: React.FC<ChartProps> = ({
           }
 
           const spread = Math.max(0, (currentVisualAskRef.current || 0) - (currentVisualBidRef.current || 0));
-          const spreadText = `$${formatPriceDynamic(spread)}`;
+          const pricePrec = getPricePrecision(currentVisualAskRef.current || currentVisualBidRef.current || targetPriceRef.current || 0).precision;
+          const spreadText = `$${formatPriceDynamic(spread, pricePrec)}`;
 
           if (!askLineRef.current) {
             try {
@@ -2361,6 +2368,16 @@ export const TradingViewChart: React.FC<ChartProps> = ({
     return () => cancelAnimationFrame(animId);
   }, [interval, symbol]);
 
+  // Reset Bid / Ask Price Line Refs whenever symbol or interval changes
+  useEffect(() => {
+    bidLineRef.current = null;
+    askLineRef.current = null;
+    targetBidRef.current = null;
+    currentVisualBidRef.current = null;
+    targetAskRef.current = null;
+    currentVisualAskRef.current = null;
+  }, [symbol, interval]);
+
   // 3. 60 FPS LERP Animation Loop for Smooth Price Line, Bid/Ask Lines & Volume Bar Transitions
   useEffect(() => {
     const rawLtp = livePrice || tick?.ltp || lastCandleValRef.current?.close || 0;
@@ -2378,7 +2395,7 @@ export const TradingViewChart: React.FC<ChartProps> = ({
       targetAskRef.current = a;
       if (currentVisualAskRef.current === null) currentVisualAskRef.current = a;
     }
-  }, [tick, livePrice]);
+  }, [tick, livePrice, symbol]);
 
   // Cleanup price lines on unmount or series reset
   useEffect(() => {
@@ -2393,6 +2410,12 @@ export const TradingViewChart: React.FC<ChartProps> = ({
           askLineRef.current = null;
         }
       }
+      bidLineRef.current = null;
+      askLineRef.current = null;
+      targetBidRef.current = null;
+      currentVisualBidRef.current = null;
+      targetAskRef.current = null;
+      currentVisualAskRef.current = null;
     };
   }, []);
 
@@ -2409,6 +2432,7 @@ export const TradingViewChart: React.FC<ChartProps> = ({
   const rawAskPrice = tick?.asks?.[0]?.price;
   const activeBid = rawBidPrice !== undefined && rawBidPrice > 0 ? rawBidPrice : (activeLtp > 0 ? activeLtp - 0.05 : 0);
   const activeAsk = rawAskPrice !== undefined && rawAskPrice > 0 ? rawAskPrice : (activeLtp > 0 ? activeLtp + 0.05 : 0);
+  const activePricePrec = getPricePrecision(activeLtp || activeAsk || activeBid || 0).precision;
   const activeSpread = Math.max(0, activeAsk - activeBid);
   const activeSpreadPct = activeAsk > 0 ? (activeSpread / activeAsk) * 100 : 0;
 
@@ -2499,7 +2523,7 @@ export const TradingViewChart: React.FC<ChartProps> = ({
           <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
             <span style={{ fontSize: "10px", color: "var(--text-muted)", fontWeight: 700 }}>SPREAD</span>
             <span style={{ fontWeight: 800, color: "var(--accent-cyan)", background: "rgba(0, 245, 255, 0.12)", padding: "1px 5px", borderRadius: "4px", border: "1px solid rgba(0, 245, 255, 0.3)" }}>
-              ${formatPriceDynamic(activeSpread)} ({activeSpreadPct.toFixed(3)}%)
+              ${formatPriceDynamic(activeSpread, activePricePrec)} ({activeSpreadPct.toFixed(3)}%)
             </span>
           </div>
 
