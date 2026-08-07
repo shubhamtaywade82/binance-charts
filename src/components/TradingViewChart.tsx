@@ -692,6 +692,44 @@ export const TradingViewChart: React.FC<ChartProps> = ({
     });
   };
 
+  // Futures Setup Scanner Collapsed State & Auto-Collapse Threshold Timer
+  const [isScannerCollapsed, setIsScannerCollapsed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem("chart_scanner_collapsed") === "true";
+    } catch {}
+    return false;
+  });
+
+  const autoCollapseTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const startAutoCollapseTimer = (delayMs = 10000) => {
+    if (autoCollapseTimerRef.current) clearTimeout(autoCollapseTimerRef.current);
+    autoCollapseTimerRef.current = setTimeout(() => {
+      setIsScannerCollapsed(true);
+      try { localStorage.setItem("chart_scanner_collapsed", "true"); } catch {}
+    }, delayMs);
+  };
+
+  const clearAutoCollapseTimer = () => {
+    if (autoCollapseTimerRef.current) {
+      clearTimeout(autoCollapseTimerRef.current);
+      autoCollapseTimerRef.current = null;
+    }
+  };
+
+  const toggleScannerCollapsed = () => {
+    setIsScannerCollapsed((prev) => {
+      const next = !prev;
+      try { localStorage.setItem("chart_scanner_collapsed", String(next)); } catch {}
+      if (!next) {
+        startAutoCollapseTimer(10000);
+      } else {
+        clearAutoCollapseTimer();
+      }
+      return next;
+    });
+  };
+
   // Group Master Toggle Helpers
   const isAnyInd = indicatorVisibility.sma20 || indicatorVisibility.ema9;
   const toggleIndicatorsGroup = () => {
@@ -853,6 +891,14 @@ export const TradingViewChart: React.FC<ChartProps> = ({
   };
 
   const [setupSignal, setSetupSignal] = useState<SetupSignal | null>(null);
+
+  // Auto-Expand on new signal update, then trigger 10s auto-collapse timer
+  useEffect(() => {
+    if (!setupSignal || !showSetupScan) return;
+    setIsScannerCollapsed(false);
+    try { localStorage.setItem("chart_scanner_collapsed", "false"); } catch {}
+    startAutoCollapseTimer(10000);
+  }, [setupSignal]);
 
   // ---- Paper trading engine state (forward-testing the setup scanner) ----
   const [paperEnabled, setPaperEnabled] = useState(() => {
@@ -2763,182 +2809,224 @@ export const TradingViewChart: React.FC<ChartProps> = ({
         </div>
       )}
 
-      {/* Futures Setup Scanner Panel - Positioned Top Right for High Visibility */}
+      {/* Futures Setup Scanner Panel - Positioned Top Right with Auto-Expand on Signal & Auto-Collapse Timer */}
       {showSetupScan && setupSignal && (
-        <div style={{
-          position: "absolute",
-          top: "12px",
-          right: "75px",
-          zIndex: 20,
-          pointerEvents: "auto",
-          width: "290px",
-          background: "rgba(15, 19, 28, 0.94)",
-          backdropFilter: "blur(12px)",
-          WebkitBackdropFilter: "blur(12px)",
-          border: "1px solid rgba(255, 255, 255, 0.14)",
-          borderRadius: "8px",
-          boxShadow: "0 8px 24px rgba(0, 0, 0, 0.6)",
-          padding: "8px 12px",
-          fontFamily: "var(--font-mono)",
-          fontSize: "10px",
-          color: "#8E9BAE",
-        }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "6px" }}>
-            <span style={{ fontWeight: 700, letterSpacing: "0.5px", fontSize: "9px", color: "var(--text-muted)" }}>
-              SETUP SCANNER{setupSignal.biasTf ? ` · BIAS ${setupSignal.biasTf}` : ""}
-            </span>
-            {setupSignal.direction === "LONG" && (
-              <span style={{ fontWeight: 800, fontSize: "12px", color: "#00F5A0" }}>LONG FUTURES</span>
-            )}
-            {setupSignal.direction === "SHORT" && (
-              <span style={{ fontWeight: 800, fontSize: "12px", color: "#FF495C" }}>SHORT FUTURES</span>
-            )}
-            {setupSignal.direction === "NO_TRADE" && (
-              <span style={{ fontWeight: 700, fontSize: "11px", color: "#8E9BAE" }}>NO TRADE</span>
-            )}
+        <div
+          onMouseEnter={(e) => {
+            (e.currentTarget as HTMLElement).style.opacity = "0.25";
+            clearAutoCollapseTimer();
+          }}
+          onMouseLeave={(e) => {
+            (e.currentTarget as HTMLElement).style.opacity = "0.85";
+            if (!isScannerCollapsed) startAutoCollapseTimer(5000);
+          }}
+          style={{
+            position: "absolute",
+            top: "12px",
+            right: "75px",
+            zIndex: 20,
+            pointerEvents: "auto",
+            width: isScannerCollapsed ? "auto" : "320px",
+            maxHeight: "calc(100% - 24px)",
+            overflowY: "auto",
+            background: "rgba(15, 19, 28, 0.6)",
+            backdropFilter: "blur(6px)",
+            WebkitBackdropFilter: "blur(6px)",
+            border: "1px solid rgba(255, 255, 255, 0.14)",
+            borderRadius: "8px",
+            boxShadow: "0 8px 24px rgba(0, 0, 0, 0.4)",
+            padding: isScannerCollapsed ? "5px 10px" : "8px 12px",
+            fontFamily: "var(--font-mono)",
+            fontSize: "10px",
+            color: "#8E9BAE",
+            opacity: 0.85,
+            transition: "all 0.2s ease-in-out",
+          }}
+        >
+          {/* Collapsible Header Bar */}
+          <div
+            onClick={toggleScannerCollapsed}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: "8px",
+              marginBottom: isScannerCollapsed ? "0px" : "6px",
+              cursor: "pointer",
+              userSelect: "none",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+              <span style={{ fontWeight: 700, letterSpacing: "0.5px", fontSize: "9px", color: "var(--text-muted)" }}>
+                SETUP SCANNER{setupSignal.biasTf ? ` · ${setupSignal.biasTf}` : ""}
+              </span>
+              {setupSignal.direction === "LONG" && (
+                <span style={{ fontWeight: 800, fontSize: "11px", color: "#00F5A0" }}>LONG</span>
+              )}
+              {setupSignal.direction === "SHORT" && (
+                <span style={{ fontWeight: 800, fontSize: "11px", color: "#FF495C" }}>SHORT</span>
+              )}
+              {setupSignal.direction === "NO_TRADE" && (
+                <span style={{ fontWeight: 700, fontSize: "10px", color: "#8E9BAE" }}>NO TRADE</span>
+              )}
+            </div>
+            <button
+              onClick={(e) => { e.stopPropagation(); toggleScannerCollapsed(); }}
+              style={{ background: "transparent", border: "none", color: "var(--text-secondary)", cursor: "pointer", padding: 0, display: "flex", alignItems: "center" }}
+              title={isScannerCollapsed ? "Expand Setup Scanner Details" : "Collapse Setup Scanner Details"}
+            >
+              {isScannerCollapsed ? <ChevronDown size={13} /> : <ChevronUp size={13} />}
+            </button>
           </div>
 
-          <div style={{ display: "flex", gap: "12px", marginBottom: "6px" }}>
-            <span>
-              BIAS{" "}
-              <span style={{
-                fontWeight: 700,
-                color: setupSignal.bias === "bullish" ? "#00F5A0" : setupSignal.bias === "bearish" ? "#FF495C" : "#8E9BAE",
-              }}>
-                {setupSignal.bias.toUpperCase()}
-              </span>{" "}
-              ({setupSignal.biasFactors.filter((f) => f.vote === "bullish").length}B/
-              {setupSignal.biasFactors.filter((f) => f.vote === "bearish").length}S)
-            </span>
-            <span>
-              CONFLUENCE{" "}
-              <span style={{ fontWeight: 700, color: setupSignal.alignedCount >= 3 ? "var(--accent-cyan)" : "#8E9BAE" }}>
-                {setupSignal.alignedCount}/6
-              </span>
-            </span>
-          </div>
-
-          {setupSignal.recommendedEntry && (
-            <div style={{
-              marginBottom: "6px",
-              padding: "6px 8px",
-              borderRadius: "6px",
-              background: setupSignal.recommendedEntry.side === "LONG" ? "rgba(0, 245, 160, 0.08)" : "rgba(255, 73, 92, 0.08)",
-              border: `1px solid ${setupSignal.recommendedEntry.side === "LONG" ? "rgba(0, 245, 160, 0.35)" : "rgba(255, 73, 92, 0.35)"}`,
-            }}>
-              <div style={{ fontWeight: 800, fontSize: "13px", color: setupSignal.recommendedEntry.side === "LONG" ? "#00F5A0" : "#FF495C" }}>
-                {setupSignal.recommendedEntry.side} {setupSignal.recommendedEntry.symbol} @ ${setupSignal.recommendedEntry.entry.price.toFixed(2)}{" "}
-                <span style={{ fontWeight: 600, fontSize: "10px", opacity: 0.8 }}>· {setupSignal.recommendedEntry.entry.label}</span>
-              </div>
-              <div style={{ fontSize: "9px", color: "#8E9BAE", marginTop: "1px" }}>{setupSignal.recommendedEntry.entry.rationale}</div>
-              <div style={{ fontSize: "9px", color: "#6B7A90", marginTop: "3px" }}>
-                STOP ${setupSignal.recommendedEntry.stop.price.toFixed(2)} ({setupSignal.recommendedEntry.stop.rationale}) · TARGET ${setupSignal.recommendedEntry.target.price.toFixed(2)} ({setupSignal.recommendedEntry.target.rationale})
-              </div>
-            </div>
-          )}
-
-          {[...setupSignal.biasFactors, ...setupSignal.confluence].map((f) => (
-            <div key={f.name} style={{ display: "flex", alignItems: "center", gap: "5px", padding: "1px 0" }}>
-              <span style={{
-                width: "6px",
-                height: "6px",
-                borderRadius: "50%",
-                flexShrink: 0,
-                background: f.vote === "bullish" ? "#00F5A0" : f.vote === "bearish" ? "#FF495C" : "#3A4356",
-              }} />
-              <span style={{ fontWeight: 600, color: f.vote === "bullish" ? "#00F5A0" : f.vote === "bearish" ? "#FF495C" : "#6B7A90", width: "130px", flexShrink: 0 }}>
-                {f.name}{f.tf ? ` · ${f.tf}` : ""}
-              </span>
-              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#8E9BAE" }}>{f.detail}</span>
-            </div>
-          ))}
-
-          {setupSignal.notes.length > 0 && (
-            <div style={{ marginTop: "6px", borderTop: "1px solid rgba(255, 255, 255, 0.08)", paddingTop: "5px", color: "#6B7A90" }}>
-              {setupSignal.notes.map((n, i) => (
-                <div key={i} style={{ padding: "1px 0", lineHeight: 1.4 }}>{n}</div>
-              ))}
-            </div>
-          )}
-
-          {paperEnabled && paperAccount && (
-            <div style={{ marginTop: "6px", borderTop: "1px solid rgba(255, 255, 255, 0.08)", paddingTop: "5px" }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <span style={{ fontWeight: 700, letterSpacing: "0.5px", fontSize: "9px", color: "var(--text-muted)" }}>
-                  PAPER TRADE · {symbol.toUpperCase()}
-                </span>
-                <span style={{ display: "flex", gap: "4px" }}>
-                  {paperAccount.open && (
-                    <button
-                      onClick={closeOpenPaper}
-                      style={{
-                        background: "rgba(255, 73, 92, 0.15)",
-                        border: "1px solid rgba(255, 73, 92, 0.4)",
-                        color: "#FF495C",
-                        padding: "1px 6px",
-                        borderRadius: "4px",
-                        fontSize: "9px",
-                        fontWeight: 700,
-                        cursor: "pointer",
-                      }}
-                    >
-                      CLOSE
-                    </button>
-                  )}
-                  <button
-                    onClick={resetPaper}
-                    style={{
-                      background: "rgba(255, 255, 255, 0.06)",
-                      border: "1px solid rgba(255, 255, 255, 0.15)",
-                      color: "var(--text-muted)",
-                      padding: "1px 6px",
-                      borderRadius: "4px",
-                      fontSize: "9px",
-                      fontWeight: 700,
-                      cursor: "pointer",
-                    }}
-                  >
-                    RESET
-                  </button>
-                </span>
-              </div>
-              <div style={{ display: "flex", gap: "10px", fontSize: "9px", marginTop: "3px", color: "#8E9BAE" }}>
+          {/* Expanded Panel Content */}
+          {!isScannerCollapsed && (
+            <>
+              <div style={{ display: "flex", gap: "12px", marginBottom: "6px" }}>
                 <span>
-                  EQUITY{" "}
-                  <span style={{ fontWeight: 700, color: "#FFFFFF" }}>${paperEquity(paperAccount).toLocaleString("en-US", { minimumFractionDigits: 2 })}</span>
+                  BIAS{" "}
+                  <span style={{
+                    fontWeight: 700,
+                    color: setupSignal.bias === "bullish" ? "#00F5A0" : setupSignal.bias === "bearish" ? "#FF495C" : "#8E9BAE",
+                  }}>
+                    {setupSignal.bias.toUpperCase()}
+                  </span>{" "}
+                  ({setupSignal.biasFactors.filter((f) => f.vote === "bullish").length}B/
+                  {setupSignal.biasFactors.filter((f) => f.vote === "bearish").length}S)
                 </span>
                 <span>
-                  REALIZED{" "}
-                  <span style={{ fontWeight: 700, color: realizedPnl(paperAccount) >= 0 ? "#00F5A0" : "#FF495C" }}>
-                    {realizedPnl(paperAccount) >= 0 ? "+" : ""}${realizedPnl(paperAccount).toLocaleString("en-US", { minimumFractionDigits: 2 })}
+                  CONFLUENCE{" "}
+                  <span style={{ fontWeight: 700, color: setupSignal.alignedCount >= 3 ? "var(--accent-cyan)" : "#8E9BAE" }}>
+                    {setupSignal.alignedCount}/6
                   </span>
                 </span>
-                <span>
-                  W {paperAccount.wins} / L {paperAccount.totalTrades - paperAccount.wins}
-                </span>
               </div>
-              {paperAccount.open ? (
-                <div style={{ marginTop: "3px", fontSize: "9px", color: "#FFFFFF" }}>
-                  OPEN {paperAccount.open.side} {paperAccount.open.symbol.toUpperCase()} × {paperAccount.open.qty} @ ${paperAccount.open.entryPrice.toFixed(2)}
-                  {paperAccount.open.estimatedEntry ? " (EST)" : ""} → ${paperAccount.open.lastPrice.toFixed(2)}{" "}
-                  <span style={{ color: paperAccount.open.lastPrice >= paperAccount.open.entryPrice ? (paperAccount.open.side === "LONG" ? "#00F5A0" : "#FF495C") : (paperAccount.open.side === "LONG" ? "#FF495C" : "#00F5A0") }}>
-                    ({(((paperAccount.open.lastPrice - paperAccount.open.entryPrice) / paperAccount.open.entryPrice) * 100 * (paperAccount.open.side === "LONG" ? 1 : -1)).toFixed(1)}%)
-                  </span>
-                  <div style={{ color: "#6B7A90" }}>
-                    STOP ${paperAccount.open.stopPrice.toFixed(2)} · TGT ${paperAccount.open.targetPrice.toFixed(2)} · MAE {paperAccount.open.maePct}% · MFE {paperAccount.open.mfePct}%
+
+              {setupSignal.recommendedEntry && (
+                <div style={{
+                  marginBottom: "6px",
+                  padding: "6px 8px",
+                  borderRadius: "6px",
+                  background: setupSignal.recommendedEntry.side === "LONG" ? "rgba(0, 245, 160, 0.08)" : "rgba(255, 73, 92, 0.08)",
+                  border: `1px solid ${setupSignal.recommendedEntry.side === "LONG" ? "rgba(0, 245, 160, 0.35)" : "rgba(255, 73, 92, 0.35)"}`,
+                }}>
+                  <div style={{ fontWeight: 800, fontSize: "13px", color: setupSignal.recommendedEntry.side === "LONG" ? "#00F5A0" : "#FF495C" }}>
+                    {setupSignal.recommendedEntry.side} {setupSignal.recommendedEntry.symbol} @ ${setupSignal.recommendedEntry.entry.price.toFixed(2)}{" "}
+                    <span style={{ fontWeight: 600, fontSize: "10px", opacity: 0.8 }}>· {setupSignal.recommendedEntry.entry.label}</span>
+                  </div>
+                  <div style={{ fontSize: "9px", color: "#8E9BAE", marginTop: "1px", wordBreak: "break-word" }}>{setupSignal.recommendedEntry.entry.rationale}</div>
+                  <div style={{ fontSize: "9px", color: "#6B7A90", marginTop: "3px", wordBreak: "break-word" }}>
+                    STOP ${setupSignal.recommendedEntry.stop.price.toFixed(2)} ({setupSignal.recommendedEntry.stop.rationale}) · TARGET ${setupSignal.recommendedEntry.target.price.toFixed(2)} ({setupSignal.recommendedEntry.target.rationale})
                   </div>
                 </div>
-              ) : (
-                <div style={{ marginTop: "3px", fontSize: "9px", color: "#6B7A90" }}>STANDBY — waiting for scanner signal</div>
               )}
-              {paperLog.length > 0 && (
-                <div style={{ marginTop: "3px", borderTop: "1px solid rgba(255, 255, 255, 0.06)", paddingTop: "3px", fontSize: "9px", color: "#6B7A90", lineHeight: 1.5 }}>
-                  {paperLog.map((l, i) => (
-                    <div key={i}>{l}</div>
+
+              {[...setupSignal.biasFactors, ...setupSignal.confluence].map((f) => (
+                <div key={f.name} style={{ display: "flex", alignItems: "flex-start", gap: "6px", padding: "2px 0" }}>
+                  <span style={{
+                    width: "6px",
+                    height: "6px",
+                    borderRadius: "50%",
+                    marginTop: "3px",
+                    flexShrink: 0,
+                    background: f.vote === "bullish" ? "#00F5A0" : f.vote === "bearish" ? "#FF495C" : "#3A4356",
+                  }} />
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "3px", flex: 1, minWidth: 0 }}>
+                    <span style={{ fontWeight: 600, color: f.vote === "bullish" ? "#00F5A0" : f.vote === "bearish" ? "#FF495C" : "#6B7A90", flexShrink: 0 }}>
+                      {f.name}{f.tf ? ` · ${f.tf}` : ""}:
+                    </span>
+                    <span style={{ color: "#8E9BAE", wordBreak: "break-word" }}>{f.detail}</span>
+                  </div>
+                </div>
+              ))}
+              {setupSignal.notes.length > 0 && (
+                <div style={{ marginTop: "6px", borderTop: "1px solid rgba(255, 255, 255, 0.08)", paddingTop: "5px", color: "#6B7A90" }}>
+                  {setupSignal.notes.map((n, i) => (
+                    <div key={i} style={{ padding: "1px 0", lineHeight: 1.4 }}>{n}</div>
                   ))}
                 </div>
               )}
-            </div>
+
+              {paperEnabled && paperAccount && (
+                <div style={{ marginTop: "6px", borderTop: "1px solid rgba(255, 255, 255, 0.08)", paddingTop: "5px" }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <span style={{ fontWeight: 700, letterSpacing: "0.5px", fontSize: "9px", color: "var(--text-muted)" }}>
+                      PAPER TRADE · {symbol.toUpperCase()}
+                    </span>
+                    <span style={{ display: "flex", gap: "4px" }}>
+                      {paperAccount.open && (
+                        <button
+                          onClick={closeOpenPaper}
+                          style={{
+                            background: "rgba(255, 73, 92, 0.15)",
+                            border: "1px solid rgba(255, 73, 92, 0.4)",
+                            color: "#FF495C",
+                            padding: "1px 6px",
+                            borderRadius: "4px",
+                            fontSize: "9px",
+                            fontWeight: 700,
+                            cursor: "pointer",
+                          }}
+                        >
+                          CLOSE
+                        </button>
+                      )}
+                      <button
+                        onClick={resetPaper}
+                        style={{
+                          background: "rgba(255, 255, 255, 0.06)",
+                          border: "1px solid rgba(255, 255, 255, 0.15)",
+                          color: "var(--text-muted)",
+                          padding: "1px 6px",
+                          borderRadius: "4px",
+                          fontSize: "9px",
+                          fontWeight: 700,
+                          cursor: "pointer",
+                        }}
+                      >
+                        RESET
+                      </button>
+                    </span>
+                  </div>
+                  <div style={{ display: "flex", gap: "10px", fontSize: "9px", marginTop: "3px", color: "#8E9BAE" }}>
+                    <span>
+                      EQUITY{" "}
+                      <span style={{ fontWeight: 700, color: "#FFFFFF" }}>${paperEquity(paperAccount).toLocaleString("en-US", { minimumFractionDigits: 2 })}</span>
+                    </span>
+                    <span>
+                      REALIZED{" "}
+                      <span style={{ fontWeight: 700, color: realizedPnl(paperAccount) >= 0 ? "#00F5A0" : "#FF495C" }}>
+                        {realizedPnl(paperAccount) >= 0 ? "+" : ""}${realizedPnl(paperAccount).toLocaleString("en-US", { minimumFractionDigits: 2 })}
+                      </span>
+                    </span>
+                    <span>
+                      W {paperAccount.wins} / L {paperAccount.totalTrades - paperAccount.wins}
+                    </span>
+                  </div>
+                  {paperAccount.open ? (
+                    <div style={{ marginTop: "3px", fontSize: "9px", color: "#FFFFFF" }}>
+                      OPEN {paperAccount.open.side} {paperAccount.open.symbol.toUpperCase()} × {paperAccount.open.qty} @ ${paperAccount.open.entryPrice.toFixed(2)}
+                      {paperAccount.open.estimatedEntry ? " (EST)" : ""} → ${paperAccount.open.lastPrice.toFixed(2)}{" "}
+                      <span style={{ color: paperAccount.open.lastPrice >= paperAccount.open.entryPrice ? (paperAccount.open.side === "LONG" ? "#00F5A0" : "#FF495C") : (paperAccount.open.side === "LONG" ? "#FF495C" : "#00F5A0") }}>
+                        ({(((paperAccount.open.lastPrice - paperAccount.open.entryPrice) / paperAccount.open.entryPrice) * 100 * (paperAccount.open.side === "LONG" ? 1 : -1)).toFixed(1)}%)
+                      </span>
+                      <div style={{ color: "#6B7A90" }}>
+                        STOP ${paperAccount.open.stopPrice.toFixed(2)} · TGT ${paperAccount.open.targetPrice.toFixed(2)} · MAE {paperAccount.open.maePct}% · MFE {paperAccount.open.mfePct}%
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ marginTop: "3px", fontSize: "9px", color: "#6B7A90" }}>STANDBY — waiting for scanner signal</div>
+                  )}
+                  {paperLog.length > 0 && (
+                    <div style={{ marginTop: "3px", borderTop: "1px solid rgba(255, 255, 255, 0.06)", paddingTop: "3px", fontSize: "9px", color: "#6B7A90", lineHeight: 1.5 }}>
+                      {paperLog.map((l, i) => (
+                        <div key={i}>{l}</div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
           )}
         </div>
       )}
