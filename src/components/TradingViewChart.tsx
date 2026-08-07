@@ -7,6 +7,7 @@ import {
   HistogramSeries,
   LineStyle,
   IPriceLine,
+  CrosshairMode,
 } from "lightweight-charts";
 import { Clock, Eye, EyeOff, ChevronDown, ChevronUp, Sliders, Layers } from "lucide-react";
 import {
@@ -1882,6 +1883,9 @@ export const TradingViewChart: React.FC<ChartProps> = ({
             layout: {
               background: { type: ColorType.Solid, color: "#0F131C" },
               textColor: "#8E9BAE",
+            },
+            crosshair: {
+              mode: CrosshairMode.Normal,
             },
             width: chartContainerRef.current!.clientWidth,
             height: chartContainerRef.current!.clientHeight || 520,
