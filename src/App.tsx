@@ -57,14 +57,12 @@ export function App() {
     return localStorage.getItem("binance_showDepthPanel") !== "false";
   });
 
-  // Resizable Right Depth Panel Width
-  const [depthPanelWidth, setDepthPanelWidth] = useState<number>(() => {
-    try {
-      const saved = localStorage.getItem("chart_depth_panel_width");
-      if (saved) return Math.min(700, Math.max(260, Number(saved))) || 380;
-    } catch {}
-    return 380;
-  });
+  // Resizable Right Depth Panel Width — Always resets to default (380px) on page reload/refresh
+  const DEFAULT_DEPTH_WIDTH = 380;
+  const MIN_DEPTH_WIDTH = 280;
+  const MAX_DEPTH_WIDTH = 580;
+
+  const [depthPanelWidth, setDepthPanelWidth] = useState<number>(DEFAULT_DEPTH_WIDTH);
   const [isResizingDepth, setIsResizingDepth] = useState(false);
 
   const handleDepthMouseDown = (e: React.MouseEvent) => {
@@ -77,9 +75,8 @@ export function App() {
 
     const handleMouseMove = (e: MouseEvent) => {
       const newWidth = window.innerWidth - e.clientX;
-      const clamped = Math.min(700, Math.max(260, newWidth));
+      const clamped = Math.min(MAX_DEPTH_WIDTH, Math.max(MIN_DEPTH_WIDTH, newWidth));
       setDepthPanelWidth(clamped);
-      try { localStorage.setItem("chart_depth_panel_width", String(clamped)); } catch {}
     };
 
     const handleMouseUp = () => {
