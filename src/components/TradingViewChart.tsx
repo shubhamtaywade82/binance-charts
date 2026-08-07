@@ -410,6 +410,9 @@ export const TradingViewChart: React.FC<ChartProps> = ({
   const currentVisualBidRef = useRef<number | null>(null);
   const targetAskRef = useRef<number | null>(null);
   const currentVisualAskRef = useRef<number | null>(null);
+  const posEntryLineRef = useRef<IPriceLine | null>(null);
+  const posStopLineRef = useRef<IPriceLine | null>(null);
+  const posTargetLineRef = useRef<IPriceLine | null>(null);
 
   const candlesVersion = (candles: any[]) => {
     const last = candles[candles.length - 1];
@@ -2397,6 +2400,107 @@ export const TradingViewChart: React.FC<ChartProps> = ({
     }
   }, [tick, livePrice, symbol]);
 
+  // Render visual Active Position Lines (Entry, SL, TP) on Chart Canvas
+  useEffect(() => {
+    if (!seriesRef.current) return;
+
+    const currentPos = paperAccount?.open;
+    const isCurrentSymbol = currentPos && currentPos.symbol.toLowerCase() === symbol.toLowerCase();
+
+    // Clean up previous position lines if no position or symbol changed
+    if (!isCurrentSymbol || !currentPos) {
+      if (posEntryLineRef.current) {
+        try { seriesRef.current.removePriceLine(posEntryLineRef.current); } catch {}
+        posEntryLineRef.current = null;
+      }
+      if (posStopLineRef.current) {
+        try { seriesRef.current.removePriceLine(posStopLineRef.current); } catch {}
+        posStopLineRef.current = null;
+      }
+      if (posTargetLineRef.current) {
+        try { seriesRef.current.removePriceLine(posTargetLineRef.current); } catch {}
+        posTargetLineRef.current = null;
+      }
+      return;
+    }
+
+    // Active Position formatting
+    const rawLtp = livePrice || tick?.ltp || currentPos.lastPrice || currentPos.entryPrice;
+    const prec = getPricePrecision(currentPos.entryPrice).precision;
+    const isLong = currentPos.side === "LONG";
+    const pnlPct = ((rawLtp - currentPos.entryPrice) / currentPos.entryPrice) * 100 * (isLong ? 1 : -1);
+    const pnlSign = pnlPct >= 0 ? "+" : "";
+
+    // 1. Entry Line
+    const entryTitle = `POS ${currentPos.side} ${currentPos.qty} @ $${formatPriceDynamic(currentPos.entryPrice, prec)} (${pnlSign}${pnlPct.toFixed(2)}%)`;
+    if (!posEntryLineRef.current) {
+      try {
+        posEntryLineRef.current = seriesRef.current.createPriceLine({
+          price: currentPos.entryPrice,
+          color: isLong ? "#00F5A0" : "#FF495C",
+          lineWidth: 2,
+          lineStyle: LineStyle.Solid,
+          axisLabelVisible: true,
+          title: entryTitle,
+        });
+      } catch (e) {}
+    } else {
+      try {
+        posEntryLineRef.current.applyOptions({
+          price: currentPos.entryPrice,
+          color: isLong ? "#00F5A0" : "#FF495C",
+          title: entryTitle,
+        });
+      } catch (e) {}
+    }
+
+    // 2. Stop Loss Line
+    const slPct = Math.abs(((currentPos.stopPrice - currentPos.entryPrice) / currentPos.entryPrice) * 100);
+    const stopTitle = `SL $${formatPriceDynamic(currentPos.stopPrice, prec)} (-${slPct.toFixed(2)}%)`;
+    if (!posStopLineRef.current) {
+      try {
+        posStopLineRef.current = seriesRef.current.createPriceLine({
+          price: currentPos.stopPrice,
+          color: "#FF495C",
+          lineWidth: 1,
+          lineStyle: LineStyle.Dotted,
+          axisLabelVisible: true,
+          title: stopTitle,
+        });
+      } catch (e) {}
+    } else {
+      try {
+        posStopLineRef.current.applyOptions({
+          price: currentPos.stopPrice,
+          title: stopTitle,
+        });
+      } catch (e) {}
+    }
+
+    // 3. Take Profit Line
+    const tpPct = Math.abs(((currentPos.targetPrice - currentPos.entryPrice) / currentPos.entryPrice) * 100);
+    const targetTitle = `TP $${formatPriceDynamic(currentPos.targetPrice, prec)} (+${tpPct.toFixed(2)}%)`;
+    if (!posTargetLineRef.current) {
+      try {
+        posTargetLineRef.current = seriesRef.current.createPriceLine({
+          price: currentPos.targetPrice,
+          color: "#00E5FF",
+          lineWidth: 1,
+          lineStyle: LineStyle.Dotted,
+          axisLabelVisible: true,
+          title: targetTitle,
+        });
+      } catch (e) {}
+    } else {
+      try {
+        posTargetLineRef.current.applyOptions({
+          price: currentPos.targetPrice,
+          title: targetTitle,
+        });
+      } catch (e) {}
+    }
+  }, [paperAccount, symbol, tick, livePrice]);
+
   // Cleanup price lines on unmount or series reset
   useEffect(() => {
     return () => {
@@ -2409,6 +2513,18 @@ export const TradingViewChart: React.FC<ChartProps> = ({
           try { seriesRef.current.removePriceLine(askLineRef.current); } catch {}
           askLineRef.current = null;
         }
+        if (posEntryLineRef.current) {
+          try { seriesRef.current.removePriceLine(posEntryLineRef.current); } catch {}
+          posEntryLineRef.current = null;
+        }
+        if (posStopLineRef.current) {
+          try { seriesRef.current.removePriceLine(posStopLineRef.current); } catch {}
+          posStopLineRef.current = null;
+        }
+        if (posTargetLineRef.current) {
+          try { seriesRef.current.removePriceLine(posTargetLineRef.current); } catch {}
+          posTargetLineRef.current = null;
+        }
       }
       bidLineRef.current = null;
       askLineRef.current = null;
@@ -2416,6 +2532,9 @@ export const TradingViewChart: React.FC<ChartProps> = ({
       currentVisualBidRef.current = null;
       targetAskRef.current = null;
       currentVisualAskRef.current = null;
+      posEntryLineRef.current = null;
+      posStopLineRef.current = null;
+      posTargetLineRef.current = null;
     };
   }, []);
 
@@ -2526,6 +2645,40 @@ export const TradingViewChart: React.FC<ChartProps> = ({
               ${formatPriceDynamic(activeSpread, activePricePrec)} ({activeSpreadPct.toFixed(3)}%)
             </span>
           </div>
+
+          {/* ACTIVE POSITION BADGE */}
+          {paperAccount?.open && paperAccount.open.symbol.toLowerCase() === symbol.toLowerCase() && (() => {
+            const pos = paperAccount.open;
+            const isLong = pos.side === "LONG";
+            const rawLtp = livePrice || tick?.ltp || pos.lastPrice || pos.entryPrice;
+            const prec = getPricePrecision(pos.entryPrice).precision;
+            const pnlPct = ((rawLtp - pos.entryPrice) / pos.entryPrice) * 100 * (isLong ? 1 : -1);
+            const pnlVal = (rawLtp - pos.entryPrice) * pos.qty * (isLong ? 1 : -1);
+            const isProfit = pnlPct >= 0;
+
+            return (
+              <>
+                <span style={{ color: "rgba(255, 255, 255, 0.2)" }}>•</span>
+                <div style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  background: isLong ? "rgba(0, 245, 160, 0.15)" : "rgba(255, 73, 92, 0.15)",
+                  border: `1px solid ${isLong ? "rgba(0, 245, 160, 0.4)" : "rgba(255, 73, 92, 0.4)"}`,
+                  padding: "2px 7px",
+                  borderRadius: "5px",
+                }}>
+                  <span style={{ fontWeight: 800, color: isLong ? "#00F5A0" : "#FF495C", fontSize: "10px" }}>
+                    ACTIVE {pos.side} × {pos.qty}
+                  </span>
+                  <span style={{ fontSize: "10px", color: "var(--text-muted)" }}>@ ${formatPriceDynamic(pos.entryPrice, prec)}</span>
+                  <span style={{ fontWeight: 800, color: isProfit ? "#00F5A0" : "#FF495C", fontSize: "11px" }}>
+                    {isProfit ? "+" : ""}${formatPriceDynamic(pnlVal, 2)} ({isProfit ? "+" : ""}{pnlPct.toFixed(2)}%)
+                  </span>
+                </div>
+              </>
+            );
+          })()}
 
           <span style={{ color: "rgba(255, 255, 255, 0.2)" }}>•</span>
 
