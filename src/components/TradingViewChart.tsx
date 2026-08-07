@@ -221,7 +221,61 @@ export const sanitizeAndSortCandles = (raw: any[]): any[] => {
   for (const c of valid) {
     map.set(c.time, c);
   }
-  return Array.from(map.values()).sort((a, b) => a.time - b.time);
+  const sorted = Array.from(map.values()).sort((a, b) => a.time - b.time);
+  return fillCandleGaps(sorted);
+};
+
+// Fills missing interval slots with flat synthetic candles so the chart shows
+// no blank gaps when Binance has sporadic missing bars or month-boundary misalignment.
+export const fillCandleGaps = (sorted: any[]): any[] => {
+  if (sorted.length < 2) return sorted;
+
+  // Detect interval in seconds from the median gap (avoids outliers)
+  const gaps: number[] = [];
+  for (let i = 1; i < Math.min(sorted.length, 50); i++) {
+    gaps.push(sorted[i].time - sorted[i - 1].time);
+  }
+  gaps.sort((a, b) => a - b);
+  const intervalSecs = gaps[Math.floor(gaps.length / 2)];
+  if (!intervalSecs || intervalSecs <= 0) return sorted;
+
+  // Snap every timestamp to exact interval boundary to fix Binance month-boundary misalignment
+  // (e.g. 1753920001 → 1753920000 for a 900s interval)
+  const snapped = sorted.map((c) => ({
+    ...c,
+    time: Math.round(c.time / intervalSecs) * intervalSecs,
+  }));
+
+  // Re-deduplicate after snapping (two candles may now share the same slot)
+  const snapMap = new Map<number, any>();
+  for (const c of snapped) {
+    if (!snapMap.has(c.time)) snapMap.set(c.time, c);
+  }
+  const deduped = Array.from(snapMap.values()).sort((a, b) => a.time - b.time);
+
+  // Fill gaps: any slot jump > 1.1× interval gets synthetic flat candles
+  const result: any[] = [deduped[0]];
+  for (let i = 1; i < deduped.length; i++) {
+    const prev = deduped[i - 1];
+    const curr = deduped[i];
+    const gap = curr.time - prev.time;
+    if (gap > intervalSecs * 1.1) {
+      let t = prev.time + intervalSecs;
+      while (t < curr.time - intervalSecs * 0.5) {
+        result.push({
+          time: t,
+          open: prev.close,
+          high: prev.close,
+          low: prev.close,
+          close: prev.close,
+          volume: 0,
+        });
+        t += intervalSecs;
+      }
+    }
+    result.push(curr);
+  }
+  return result;
 };
 
 export type DefaultScaleMode = "last_bars" | "fixed_spacing" | "fit_content";
@@ -2301,13 +2355,18 @@ export const TradingViewChart: React.FC<ChartProps> = ({
       }
     };
 
-    fetchAndRender();
+    // Subscribe after fetchAndRender finishes (chart is assigned to chartRef.current by then)
+    fetchAndRender().then(() => {
+      if (chartRef.current) {
+        chartRef.current.timeScale().subscribeVisibleLogicalRangeChange(handleVisibleRangeChange);
+      }
+    });
 
     const resizeObserver = new ResizeObserver((entries) => {
-      if (chart && entries[0] && entries[0].contentRect) {
+      if (chartRef.current && entries[0] && entries[0].contentRect) {
         const { width } = entries[0].contentRect;
         if (width > 0) {
-          chart.applyOptions({ width });
+          chartRef.current.applyOptions({ width });
         }
       }
     });
@@ -2315,6 +2374,52 @@ export const TradingViewChart: React.FC<ChartProps> = ({
     if (chartContainerRef.current) {
       resizeObserver.observe(chartContainerRef.current);
     }
+
+    // Lazy-load older historical candles when user scrolls near the left edge
+    let isFetchingHistory = false;
+    const handleVisibleRangeChange = async () => {
+      if (!chartRef.current || !isSubscribed || isFetchingHistory || customCandles?.length) return;
+
+      const oldest = allCandlesRef.current[0];
+      if (!oldest) return;
+
+      // Use time-based trigger: fire when visible left edge is within 20 candles of oldest data
+      const visibleRange = chartRef.current.timeScale().getVisibleRange() as { from: number; to: number } | null;
+      if (!visibleRange) return;
+
+      const intervalSecs = (parseInt(interval, 10) || 15) * 60;
+      const triggerThreshold = oldest.time + intervalSecs * 20;
+      if (visibleRange.from > triggerThreshold) return; // still far from left edge
+
+      isFetchingHistory = true;
+      try {
+        const toTs = oldest.time;
+        const toDate = new Date(toTs * 1000).toISOString();
+        const fromDate = new Date((toTs - 7 * 86400) * 1000).toISOString();
+        const res = await fetch(
+          `/api/charts/historical?symbol=${encodeURIComponent(symbol)}&interval=${interval}&fromDate=${fromDate}&toDate=${toDate}`
+        );
+        const json = await res.json();
+        if (json?.candles?.length) {
+          const older = sanitizeAndSortCandles(json.candles).filter(
+            (c: any) => c.time < oldest.time
+          );
+          if (older.length > 0 && seriesRef.current) {
+            const merged = sanitizeAndSortCandles([...older, ...allCandlesRef.current]);
+            allCandlesRef.current = merged;
+            const mergedVolume = merged.map((c: any) => ({
+              time: c.time,
+              value: c.volume,
+              color: c.close >= c.open ? activeThemeRef.current.volUpColor : activeThemeRef.current.volDownColor,
+            }));
+            seriesRef.current.setData(merged);
+            if (volumeSeriesRef.current) volumeSeriesRef.current.setData(mergedVolume);
+            scheduleDraw();
+          }
+        }
+      } catch (e) {}
+      isFetchingHistory = false;
+    };
 
     // Periodic 60s Background Reconciliation to ensure all historical candles remain perfectly in sync
     const reconcileTimer = setInterval(async () => {
