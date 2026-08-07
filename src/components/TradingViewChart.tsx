@@ -1833,6 +1833,53 @@ export const TradingViewChart: React.FC<ChartProps> = ({
         ctx.textAlign = "left";
       });
     }
+
+    // Render Vertical Glowing Spread Line Connector right after the current forming candle
+    if (currentVisualBidRef.current && currentVisualAskRef.current && seriesRef.current && chartRef.current) {
+      try {
+        const askY = seriesRef.current.priceToCoordinate(currentVisualAskRef.current);
+        const bidY = seriesRef.current.priceToCoordinate(currentVisualBidRef.current);
+        const totalCandles = allCandlesRef.current.length;
+        const lastLogicalIndex = totalCandles > 0 ? totalCandles - 1 : null;
+        const prevLogicalIndex = totalCandles > 1 ? totalCandles - 2 : null;
+        const timeScale = chartRef.current.timeScale();
+        const candleX = lastLogicalIndex !== null ? timeScale.logicalToCoordinate(lastLogicalIndex as any) : null;
+        const prevX = prevLogicalIndex !== null ? timeScale.logicalToCoordinate(prevLogicalIndex as any) : null;
+        const dynamicBarWidth = (candleX !== null && prevX !== null && !isNaN(prevX)) ? Math.abs(candleX - prevX) : 16;
+        const dynamicOffset = Math.max(14, dynamicBarWidth * 1.4);
+
+        if (askY !== null && bidY !== null && !isNaN(askY) && !isNaN(bidY)) {
+          const spreadX = candleX !== null && !isNaN(candleX) && candleX > 0 && candleX < width ? candleX + dynamicOffset : width - 80;
+          const minY = Math.min(askY, bidY);
+          const maxY = Math.max(askY, bidY);
+
+          // Glowing vertical spread bar right after forming candle
+          ctx.strokeStyle = "rgba(0, 245, 255, 0.9)";
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(spreadX, minY);
+          ctx.lineTo(spreadX, maxY);
+          ctx.stroke();
+
+          // Top (Ask) and Bottom (Bid) horizontal cap ticks
+          ctx.fillStyle = "rgba(0, 245, 255, 1)";
+          ctx.fillRect(spreadX - 4, minY - 1, 9, 2);
+          ctx.fillRect(spreadX - 4, maxY - 1, 9, 2);
+
+          // Render live spread value centered vertically to the right of the spread line
+          const spreadVal = Math.max(0, (currentVisualAskRef.current || 0) - (currentVisualBidRef.current || 0));
+          const pricePrec = getPricePrecision(currentVisualAskRef.current || currentVisualBidRef.current || targetPriceRef.current || 0).precision;
+          const spreadLabelText = `$${formatPriceDynamic(spreadVal, pricePrec)}`;
+          const midY = (minY + maxY) / 2;
+
+          ctx.font = "bold 9px monospace";
+          ctx.fillStyle = "rgba(0, 245, 255, 1)";
+          ctx.textAlign = "left";
+          ctx.textBaseline = "middle";
+          ctx.fillText(spreadLabelText, spreadX + 8, midY);
+        }
+      } catch (e) {}
+    }
   };
 
   // Toggle Hollow Candles Mode (persisted to localStorage)
@@ -2226,6 +2273,7 @@ export const TradingViewChart: React.FC<ChartProps> = ({
           currentVisualVolumeRef.current = 10;
           targetVolumeRef.current = 10;
           lastCandleValRef.current = newCandle;
+          allCandlesRef.current = [...allCandlesRef.current, newCandle];
 
           try {
             seriesRef.current.update(newCandle);
@@ -2350,14 +2398,14 @@ export const TradingViewChart: React.FC<ChartProps> = ({
                 lineWidth: 1,
                 lineStyle: LineStyle.Dashed,
                 axisLabelVisible: true,
-                title: `ASK (SPREAD ${spreadText})`,
+                title: "ASK",
               });
             } catch (e) {}
           } else {
             try {
               askLineRef.current.applyOptions({
                 price: currentVisualAskRef.current,
-                title: `ASK (SPREAD ${spreadText})`,
+                title: "ASK",
               });
             } catch (e) {}
           }
