@@ -29,6 +29,26 @@ import {
   CandlestickPattern,
   CandlestickPatternType,
 } from "../utils/smcEngine";
+
+export function getPricePrecision(price: number): { precision: number; minMove: number } {
+  const abs = Math.abs(price);
+  if (abs === 0) return { precision: 2, minMove: 0.01 };
+  if (abs < 0.0001) return { precision: 7, minMove: 0.0000001 };
+  if (abs < 0.01) return { precision: 6, minMove: 0.000001 };
+  if (abs < 1) return { precision: 5, minMove: 0.00001 };
+  if (abs < 10) return { precision: 4, minMove: 0.0001 };
+  if (abs < 100) return { precision: 3, minMove: 0.001 };
+  return { precision: 2, minMove: 0.01 };
+}
+
+export function formatPriceDynamic(price: number | undefined | null, precisionOverride?: number): string {
+  if (price === undefined || price === null || isNaN(price)) return "0.00";
+  const prec = precisionOverride ?? getPricePrecision(price).precision;
+  return price.toLocaleString("en-US", {
+    minimumFractionDigits: prec,
+    maximumFractionDigits: prec,
+  });
+}
 import {
   detectICTSessions,
   detectSilverBulletWindows,
@@ -1946,6 +1966,19 @@ export const TradingViewChart: React.FC<ChartProps> = ({
           candlestickSeries.setData(formattedCandles);
           volumeSeries.setData(formattedVolume);
 
+          // Apply dynamic price precision based on initial candle prices
+          if (formattedCandles.length > 0) {
+            const samplePrice = formattedCandles[formattedCandles.length - 1].close;
+            const { precision, minMove } = getPricePrecision(samplePrice);
+            candlestickSeries.applyOptions({
+              priceFormat: {
+                type: "price",
+                precision,
+                minMove,
+              },
+            });
+          }
+
           // Draw 2D SMC Shaded Box Overlays
           scheduleDraw();
 
@@ -2163,7 +2196,7 @@ export const TradingViewChart: React.FC<ChartProps> = ({
 
         // Smooth 60 FPS LERP Interpolation (alpha = 0.08 for ~250ms visual gliding)
         const priceDiff = rawTargetLtp - currentVisualPriceRef.current;
-        if (Math.abs(priceDiff) > 0.0001) {
+        if (Math.abs(priceDiff) > 1e-9) {
           currentVisualPriceRef.current += priceDiff * 0.08;
         } else {
           currentVisualPriceRef.current = rawTargetLtp;
@@ -2263,7 +2296,7 @@ export const TradingViewChart: React.FC<ChartProps> = ({
         // 60 FPS LERP Interpolation for Best Bid Price Line (alpha = 0.08)
         if (targetBidRef.current !== null && currentVisualBidRef.current !== null && seriesRef.current) {
           const bidDiff = targetBidRef.current - currentVisualBidRef.current;
-          if (Math.abs(bidDiff) > 0.0001) {
+          if (Math.abs(bidDiff) > 1e-9) {
             currentVisualBidRef.current += bidDiff * 0.08;
           } else {
             currentVisualBidRef.current = targetBidRef.current;
@@ -2290,14 +2323,14 @@ export const TradingViewChart: React.FC<ChartProps> = ({
         // 60 FPS LERP Interpolation for Best Ask Price Line (alpha = 0.08)
         if (targetAskRef.current !== null && currentVisualAskRef.current !== null && seriesRef.current) {
           const askDiff = targetAskRef.current - currentVisualAskRef.current;
-          if (Math.abs(askDiff) > 0.0001) {
+          if (Math.abs(askDiff) > 1e-9) {
             currentVisualAskRef.current += askDiff * 0.08;
           } else {
             currentVisualAskRef.current = targetAskRef.current;
           }
 
           const spread = Math.max(0, (currentVisualAskRef.current || 0) - (currentVisualBidRef.current || 0));
-          const spreadText = spread < 1 ? `$${spread.toFixed(4)}` : `$${spread.toFixed(2)}`;
+          const spreadText = `$${formatPriceDynamic(spread)}`;
 
           if (!askLineRef.current) {
             try {
@@ -2416,7 +2449,7 @@ export const TradingViewChart: React.FC<ChartProps> = ({
           <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
             <span style={{ fontSize: "10px", color: "var(--text-muted)", fontWeight: 700 }}>LTP</span>
             <span style={{ fontWeight: 800, color: activeChange >= 0 ? "var(--accent-green)" : "var(--accent-red)" }}>
-              ${Number(activeLtp).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              ${formatPriceDynamic(activeLtp)}
             </span>
           </div>
 
@@ -2426,7 +2459,7 @@ export const TradingViewChart: React.FC<ChartProps> = ({
           <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
             <span style={{ fontSize: "10px", color: "var(--text-muted)", fontWeight: 700 }}>CHG</span>
             <span style={{ fontWeight: 700, color: activeChange >= 0 ? "var(--accent-green)" : "var(--accent-red)" }}>
-              {activeChange >= 0 ? "+" : ""}{Number(activeChange).toFixed(2)} ({activePChange >= 0 ? "+" : ""}{Number(activePChange).toFixed(2)}%)
+              {activeChange >= 0 ? "+" : ""}{formatPriceDynamic(activeChange)} ({activePChange >= 0 ? "+" : ""}{Number(activePChange).toFixed(2)}%)
             </span>
           </div>
 
@@ -2446,7 +2479,7 @@ export const TradingViewChart: React.FC<ChartProps> = ({
           <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
             <span style={{ fontSize: "10px", color: "var(--text-muted)", fontWeight: 700 }}>BID</span>
             <span style={{ fontWeight: 800, color: "#00F5A0" }}>
-              ${Number(activeBid).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              ${formatPriceDynamic(activeBid)}
             </span>
           </div>
 
@@ -2456,7 +2489,7 @@ export const TradingViewChart: React.FC<ChartProps> = ({
           <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
             <span style={{ fontSize: "10px", color: "var(--text-muted)", fontWeight: 700 }}>ASK</span>
             <span style={{ fontWeight: 800, color: "#FF495C" }}>
-              ${Number(activeAsk).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              ${formatPriceDynamic(activeAsk)}
             </span>
           </div>
 
@@ -2466,7 +2499,7 @@ export const TradingViewChart: React.FC<ChartProps> = ({
           <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
             <span style={{ fontSize: "10px", color: "var(--text-muted)", fontWeight: 700 }}>SPREAD</span>
             <span style={{ fontWeight: 800, color: "var(--accent-cyan)", background: "rgba(0, 245, 255, 0.12)", padding: "1px 5px", borderRadius: "4px", border: "1px solid rgba(0, 245, 255, 0.3)" }}>
-              {activeSpread < 1 ? `$${activeSpread.toFixed(4)}` : `$${activeSpread.toFixed(2)}`} ({activeSpreadPct.toFixed(3)}%)
+              ${formatPriceDynamic(activeSpread)} ({activeSpreadPct.toFixed(3)}%)
             </span>
           </div>
 

@@ -1,5 +1,6 @@
 import React from "react";
 import { Activity, ArrowDownRight, ArrowUpRight, BarChart2, ShieldAlert } from "lucide-react";
+import { formatPriceDynamic, getPricePrecision } from "./TradingViewChart";
 
 interface DepthLevel {
   price: number;
@@ -27,7 +28,8 @@ export const MarketDepthStream: React.FC<MarketDepthProps> = ({ bids = [], asks 
 
   const bestBid = bids[0]?.price || 0;
   const bestAsk = asks[0]?.price || 0;
-  const spread = bestAsk > 0 && bestBid > 0 ? Number((bestAsk - bestBid).toFixed(2)) : 0;
+  const spread = bestAsk > 0 && bestBid > 0 ? Math.max(0, bestAsk - bestBid) : 0;
+  const pricePrec = getPricePrecision(bestAsk || bestBid || 1).precision;
 
   return (
     <div style={{ padding: "12px 14px", display: "flex", flexDirection: "column", gap: "12px", height: "100%", background: "var(--bg-surface)", borderLeft: "1px solid var(--border-color)", overflow: "hidden", whiteSpace: "nowrap" }}>
@@ -56,7 +58,7 @@ export const MarketDepthStream: React.FC<MarketDepthProps> = ({ bids = [], asks 
             BUY {bidQtyPct}% ({totalBidQty.toLocaleString("en-IN")})
           </span>
           <span style={{ color: "var(--text-muted)", flexShrink: 0 }} className="mono">
-            SPREAD ${spread.toFixed(2)}
+            SPREAD ${formatPriceDynamic(spread, pricePrec)}
           </span>
           <span style={{ color: "var(--accent-red)", overflow: "hidden", textOverflow: "ellipsis", textAlign: "right" }} className="mono">
             SELL {askQtyPct}% ({totalAskQty.toLocaleString("en-IN")})
@@ -117,7 +119,7 @@ export const MarketDepthStream: React.FC<MarketDepthProps> = ({ bids = [], asks 
                     {b.quantity.toLocaleString("en-IN")}
                   </span>
                   <span style={{ textAlign: "right", zIndex: 1, color: "var(--accent-green)", fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis" }} className="mono">
-                    {b.price.toFixed(2)}
+                    {formatPriceDynamic(b.price, pricePrec)}
                   </span>
                 </div>
               );
@@ -166,7 +168,7 @@ export const MarketDepthStream: React.FC<MarketDepthProps> = ({ bids = [], asks 
                   />
 
                   <span style={{ color: "var(--accent-red)", zIndex: 1, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis" }} className="mono">
-                    {a.price.toFixed(2)}
+                    {formatPriceDynamic(a.price, pricePrec)}
                   </span>
                   <span style={{ textAlign: "right", zIndex: 1, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis" }} className="mono">
                     {a.quantity.toLocaleString("en-IN")}
