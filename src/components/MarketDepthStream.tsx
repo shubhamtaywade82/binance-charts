@@ -30,36 +30,36 @@ export const MarketDepthStream: React.FC<MarketDepthProps> = ({ bids = [], asks 
   const spread = bestAsk > 0 && bestBid > 0 ? Number((bestAsk - bestBid).toFixed(2)) : 0;
 
   return (
-    <div style={{ padding: "12px 14px", display: "flex", flexDirection: "column", gap: "12px", height: "100%", background: "var(--bg-surface)", borderLeft: "1px solid var(--border-color)" }}>
+    <div style={{ padding: "12px 14px", display: "flex", flexDirection: "column", gap: "12px", height: "100%", background: "var(--bg-surface)", borderLeft: "1px solid var(--border-color)", overflow: "hidden", whiteSpace: "nowrap" }}>
       {/* 1. Header & Live Indicator */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          <Activity size={18} color="var(--accent-cyan)" />
-          <div>
-            <div style={{ fontSize: "14px", fontWeight: 700, letterSpacing: "-0.3px" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", whiteSpace: "nowrap", overflow: "hidden" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px", overflow: "hidden" }}>
+          <Activity size={18} color="var(--accent-cyan)" style={{ flexShrink: 0 }} />
+          <div style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
+            <div style={{ fontSize: "13px", fontWeight: 700, letterSpacing: "-0.3px", overflow: "hidden", textOverflow: "ellipsis" }}>
               20-Level Order Book Microstructure
             </div>
-            <div style={{ fontSize: "11px", color: "var(--text-muted)" }}>
+            <div style={{ fontSize: "10px", color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis" }}>
               Real-Time L2 Depth & Liquidity Clusters ({symbol.toUpperCase()})
             </div>
           </div>
         </div>
-        <span className="mono" style={{ fontSize: "11px", padding: "4px 8px", borderRadius: "12px", background: "rgba(0,245,160,0.12)", color: "var(--accent-green)", fontWeight: 700 }}>
+        <span className="mono" style={{ fontSize: "10px", padding: "3px 7px", borderRadius: "12px", background: "rgba(0,245,160,0.12)", color: "var(--accent-green)", fontWeight: 700, flexShrink: 0 }}>
           LIVE FEED
         </span>
       </div>
 
       {/* 2. Order Book Imbalance & Spread Bar */}
-      <div className="glass-card" style={{ padding: "12px", display: "flex", flexDirection: "column", gap: "8px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", fontWeight: 600 }}>
-          <span style={{ color: "var(--accent-green)" }} className="mono">
-            BUYERS {bidQtyPct}% ({totalBidQty.toLocaleString("en-IN")} QTY)
+      <div className="glass-card" style={{ padding: "10px 12px", display: "flex", flexDirection: "column", gap: "6px", whiteSpace: "nowrap", overflow: "hidden" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "10px", fontWeight: 600, whiteSpace: "nowrap", gap: "6px" }}>
+          <span style={{ color: "var(--accent-green)", overflow: "hidden", textOverflow: "ellipsis" }} className="mono">
+            BUY {bidQtyPct}% ({totalBidQty.toLocaleString("en-IN")})
           </span>
-          <span style={{ color: "var(--text-muted)" }} className="mono">
-            SPREAD: ${spread.toFixed(2)}
+          <span style={{ color: "var(--text-muted)", flexShrink: 0 }} className="mono">
+            SPREAD ${spread.toFixed(2)}
           </span>
-          <span style={{ color: "var(--accent-red)" }} className="mono">
-            SELLERS {askQtyPct}% ({totalAskQty.toLocaleString("en-IN")} QTY)
+          <span style={{ color: "var(--accent-red)", overflow: "hidden", textOverflow: "ellipsis", textAlign: "right" }} className="mono">
+            SELL {askQtyPct}% ({totalAskQty.toLocaleString("en-IN")})
           </span>
         </div>
 
@@ -71,10 +71,10 @@ export const MarketDepthStream: React.FC<MarketDepthProps> = ({ bids = [], asks 
       </div>
 
       {/* 3. Dual Column Depth Table */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", flex: 1, fontSize: "11px" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", flex: 1, fontSize: "11px", overflowX: "auto", overflowY: "auto", whiteSpace: "nowrap" }}>
         {/* Bids Side */}
-        <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-          <div style={{ display: "grid", gridTemplateColumns: "40px 1fr 1fr", padding: "6px 8px", color: "var(--text-muted)", fontSize: "10px", fontWeight: 700, borderBottom: "1px solid var(--border-color)", background: "rgba(0,0,0,0.2)" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: "2px", overflow: "hidden" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "36px 1fr 1fr", padding: "5px 6px", color: "var(--text-muted)", fontSize: "9px", fontWeight: 700, borderBottom: "1px solid var(--border-color)", background: "rgba(0,0,0,0.2)", whiteSpace: "nowrap" }}>
             <span>ORD</span>
             <span style={{ textAlign: "right" }}>BID QTY</span>
             <span style={{ textAlign: "right" }}>BID PRICE</span>
@@ -88,11 +88,12 @@ export const MarketDepthStream: React.FC<MarketDepthProps> = ({ bids = [], asks 
                   key={idx}
                   style={{
                     display: "grid",
-                    gridTemplateColumns: "40px 1fr 1fr",
-                    padding: "6px 8px",
+                    gridTemplateColumns: "36px 1fr 1fr",
+                    padding: "5px 6px",
                     position: "relative",
                     borderRadius: "4px",
                     overflow: "hidden",
+                    whiteSpace: "nowrap",
                   }}
                 >
                   {/* Depth Bar Background */}
@@ -109,13 +110,13 @@ export const MarketDepthStream: React.FC<MarketDepthProps> = ({ bids = [], asks 
                     }}
                   />
 
-                  <span style={{ color: "var(--text-muted)", zIndex: 1 }} className="mono">
+                  <span style={{ color: "var(--text-muted)", zIndex: 1, overflow: "hidden", textOverflow: "ellipsis" }} className="mono">
                     {b.orders}
                   </span>
-                  <span style={{ textAlign: "right", zIndex: 1, fontWeight: 500 }} className="mono">
+                  <span style={{ textAlign: "right", zIndex: 1, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis" }} className="mono">
                     {b.quantity.toLocaleString("en-IN")}
                   </span>
-                  <span style={{ textAlign: "right", zIndex: 1, color: "var(--accent-green)", fontWeight: 700 }} className="mono">
+                  <span style={{ textAlign: "right", zIndex: 1, color: "var(--accent-green)", fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis" }} className="mono">
                     {b.price.toFixed(2)}
                   </span>
                 </div>
@@ -127,8 +128,8 @@ export const MarketDepthStream: React.FC<MarketDepthProps> = ({ bids = [], asks 
         </div>
 
         {/* Asks Side */}
-        <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 40px", padding: "6px 8px", color: "var(--text-muted)", fontSize: "10px", fontWeight: 700, borderBottom: "1px solid var(--border-color)", background: "rgba(0,0,0,0.2)" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: "2px", overflow: "hidden" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 36px", padding: "5px 6px", color: "var(--text-muted)", fontSize: "9px", fontWeight: 700, borderBottom: "1px solid var(--border-color)", background: "rgba(0,0,0,0.2)", whiteSpace: "nowrap" }}>
             <span>ASK PRICE</span>
             <span style={{ textAlign: "right" }}>ASK QTY</span>
             <span style={{ textAlign: "right" }}>ORD</span>
@@ -142,11 +143,12 @@ export const MarketDepthStream: React.FC<MarketDepthProps> = ({ bids = [], asks 
                   key={idx}
                   style={{
                     display: "grid",
-                    gridTemplateColumns: "1fr 1fr 40px",
-                    padding: "6px 8px",
+                    gridTemplateColumns: "1fr 1fr 36px",
+                    padding: "5px 6px",
                     position: "relative",
                     borderRadius: "4px",
                     overflow: "hidden",
+                    whiteSpace: "nowrap",
                   }}
                 >
                   {/* Depth Bar Background */}
@@ -163,13 +165,13 @@ export const MarketDepthStream: React.FC<MarketDepthProps> = ({ bids = [], asks 
                     }}
                   />
 
-                  <span style={{ color: "var(--accent-red)", zIndex: 1, fontWeight: 700 }} className="mono">
+                  <span style={{ color: "var(--accent-red)", zIndex: 1, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis" }} className="mono">
                     {a.price.toFixed(2)}
                   </span>
-                  <span style={{ textAlign: "right", zIndex: 1, fontWeight: 500 }} className="mono">
+                  <span style={{ textAlign: "right", zIndex: 1, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis" }} className="mono">
                     {a.quantity.toLocaleString("en-IN")}
                   </span>
-                  <span style={{ textAlign: "right", zIndex: 1, color: "var(--text-muted)" }} className="mono">
+                  <span style={{ textAlign: "right", zIndex: 1, color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis" }} className="mono">
                     {a.orders}
                   </span>
                 </div>

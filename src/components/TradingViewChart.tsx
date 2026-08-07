@@ -5,6 +5,8 @@ import {
   CandlestickSeries,
   LineSeries,
   HistogramSeries,
+  LineStyle,
+  IPriceLine,
 } from "lightweight-charts";
 import { Clock, Eye, EyeOff, ChevronDown, ChevronUp, Sliders, Layers } from "lucide-react";
 import {
@@ -381,6 +383,12 @@ export const TradingViewChart: React.FC<ChartProps> = ({
   const scanVersionRef = useRef("");
   const scanPriceRef = useRef<number | null>(null);
   const lastSignalKeyRef = useRef("");
+  const bidLineRef = useRef<IPriceLine | null>(null);
+  const askLineRef = useRef<IPriceLine | null>(null);
+  const targetBidRef = useRef<number | null>(null);
+  const currentVisualBidRef = useRef<number | null>(null);
+  const targetAskRef = useRef<number | null>(null);
+  const currentVisualAskRef = useRef<number | null>(null);
 
   const candlesVersion = (candles: any[]) => {
     const last = candles[candles.length - 1];
@@ -2247,6 +2255,66 @@ export const TradingViewChart: React.FC<ChartProps> = ({
           lastDrawnCandleRef.current = candleKey;
           scheduleDraw();
         }
+
+        // 60 FPS LERP Interpolation for Best Bid Price Line (alpha = 0.08)
+        if (targetBidRef.current !== null && currentVisualBidRef.current !== null && seriesRef.current) {
+          const bidDiff = targetBidRef.current - currentVisualBidRef.current;
+          if (Math.abs(bidDiff) > 0.0001) {
+            currentVisualBidRef.current += bidDiff * 0.08;
+          } else {
+            currentVisualBidRef.current = targetBidRef.current;
+          }
+
+          if (!bidLineRef.current) {
+            try {
+              bidLineRef.current = seriesRef.current.createPriceLine({
+                price: currentVisualBidRef.current,
+                color: "#00F5A0",
+                lineWidth: 1,
+                lineStyle: LineStyle.Dashed,
+                axisLabelVisible: true,
+                title: "BID",
+              });
+            } catch (e) {}
+          } else {
+            try {
+              bidLineRef.current.applyOptions({ price: currentVisualBidRef.current });
+            } catch (e) {}
+          }
+        }
+
+        // 60 FPS LERP Interpolation for Best Ask Price Line (alpha = 0.08)
+        if (targetAskRef.current !== null && currentVisualAskRef.current !== null && seriesRef.current) {
+          const askDiff = targetAskRef.current - currentVisualAskRef.current;
+          if (Math.abs(askDiff) > 0.0001) {
+            currentVisualAskRef.current += askDiff * 0.08;
+          } else {
+            currentVisualAskRef.current = targetAskRef.current;
+          }
+
+          const spread = Math.max(0, (currentVisualAskRef.current || 0) - (currentVisualBidRef.current || 0));
+          const spreadText = spread < 1 ? `$${spread.toFixed(4)}` : `$${spread.toFixed(2)}`;
+
+          if (!askLineRef.current) {
+            try {
+              askLineRef.current = seriesRef.current.createPriceLine({
+                price: currentVisualAskRef.current,
+                color: "#FF495C",
+                lineWidth: 1,
+                lineStyle: LineStyle.Dashed,
+                axisLabelVisible: true,
+                title: `ASK (SPREAD ${spreadText})`,
+              });
+            } catch (e) {}
+          } else {
+            try {
+              askLineRef.current.applyOptions({
+                price: currentVisualAskRef.current,
+                title: `ASK (SPREAD ${spreadText})`,
+              });
+            } catch (e) {}
+          }
+        }
       }
 
       animId = requestAnimationFrame(animateLerp);
@@ -2256,6 +2324,41 @@ export const TradingViewChart: React.FC<ChartProps> = ({
     return () => cancelAnimationFrame(animId);
   }, [interval, symbol]);
 
+  // 3. 60 FPS LERP Animation Loop for Smooth Price Line, Bid/Ask Lines & Volume Bar Transitions
+  useEffect(() => {
+    const rawLtp = livePrice || tick?.ltp || lastCandleValRef.current?.close || 0;
+    const rawBid = tick?.bids?.[0]?.price;
+    const rawAsk = tick?.asks?.[0]?.price;
+
+    const b = rawBid !== undefined && rawBid > 0 ? rawBid : (rawLtp > 0 ? rawLtp - 0.05 : null);
+    const a = rawAsk !== undefined && rawAsk > 0 ? rawAsk : (rawLtp > 0 ? rawLtp + 0.05 : null);
+
+    if (b !== null) {
+      targetBidRef.current = b;
+      if (currentVisualBidRef.current === null) currentVisualBidRef.current = b;
+    }
+    if (a !== null) {
+      targetAskRef.current = a;
+      if (currentVisualAskRef.current === null) currentVisualAskRef.current = a;
+    }
+  }, [tick, livePrice]);
+
+  // Cleanup price lines on unmount or series reset
+  useEffect(() => {
+    return () => {
+      if (seriesRef.current) {
+        if (bidLineRef.current) {
+          try { seriesRef.current.removePriceLine(bidLineRef.current); } catch {}
+          bidLineRef.current = null;
+        }
+        if (askLineRef.current) {
+          try { seriesRef.current.removePriceLine(askLineRef.current); } catch {}
+          askLineRef.current = null;
+        }
+      }
+    };
+  }, []);
+
   const activeLtp = livePrice || tick?.ltp || (lastCandleValRef.current?.close || 0);
   const activeChange = tick?.change !== undefined ? tick.change : 0;
   const activePChange = tick?.pChange !== undefined ? tick.pChange : 0;
@@ -2264,6 +2367,13 @@ export const TradingViewChart: React.FC<ChartProps> = ({
   const tickTimeFormatted = tick?.timestamp
     ? new Date(tick.timestamp).toLocaleTimeString("en-GB", { timeZone: "UTC", hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" }) + " UTC"
     : new Date().toLocaleTimeString("en-GB", { timeZone: "UTC", hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" }) + " UTC";
+
+  const rawBidPrice = tick?.bids?.[0]?.price;
+  const rawAskPrice = tick?.asks?.[0]?.price;
+  const activeBid = rawBidPrice !== undefined && rawBidPrice > 0 ? rawBidPrice : (activeLtp > 0 ? activeLtp - 0.05 : 0);
+  const activeAsk = rawAskPrice !== undefined && rawAskPrice > 0 ? rawAskPrice : (activeLtp > 0 ? activeLtp + 0.05 : 0);
+  const activeSpread = Math.max(0, activeAsk - activeBid);
+  const activeSpreadPct = activeAsk > 0 ? (activeSpread / activeAsk) * 100 : 0;
 
   return (
     <div style={{ position: "relative", width: "100%", height: "100%", minHeight: "520px" }}>
@@ -2323,6 +2433,36 @@ export const TradingViewChart: React.FC<ChartProps> = ({
             <span style={{ fontSize: "10px", color: "var(--text-muted)", fontWeight: 700 }}>VOL</span>
             <span style={{ fontWeight: 700, color: "#FFFFFF" }}>
               {Number(activeVolume).toLocaleString("en-US")}
+            </span>
+          </div>
+
+          <span style={{ color: "rgba(255, 255, 255, 0.2)" }}>•</span>
+
+          {/* BID */}
+          <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+            <span style={{ fontSize: "10px", color: "var(--text-muted)", fontWeight: 700 }}>BID</span>
+            <span style={{ fontWeight: 800, color: "#00F5A0" }}>
+              ${Number(activeBid).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </span>
+          </div>
+
+          <span style={{ color: "rgba(255, 255, 255, 0.2)" }}>•</span>
+
+          {/* ASK */}
+          <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+            <span style={{ fontSize: "10px", color: "var(--text-muted)", fontWeight: 700 }}>ASK</span>
+            <span style={{ fontWeight: 800, color: "#FF495C" }}>
+              ${Number(activeAsk).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </span>
+          </div>
+
+          <span style={{ color: "rgba(255, 255, 255, 0.2)" }}>•</span>
+
+          {/* SPREAD */}
+          <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+            <span style={{ fontSize: "10px", color: "var(--text-muted)", fontWeight: 700 }}>SPREAD</span>
+            <span style={{ fontWeight: 800, color: "var(--accent-cyan)", background: "rgba(0, 245, 255, 0.12)", padding: "1px 5px", borderRadius: "4px", border: "1px solid rgba(0, 245, 255, 0.3)" }}>
+              {activeSpread < 1 ? `$${activeSpread.toFixed(4)}` : `$${activeSpread.toFixed(2)}`} ({activeSpreadPct.toFixed(3)}%)
             </span>
           </div>
 

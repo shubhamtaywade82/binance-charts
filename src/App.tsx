@@ -57,6 +57,43 @@ export function App() {
     return localStorage.getItem("binance_showDepthPanel") !== "false";
   });
 
+  // Resizable Right Depth Panel Width
+  const [depthPanelWidth, setDepthPanelWidth] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem("chart_depth_panel_width");
+      if (saved) return Math.min(700, Math.max(260, Number(saved))) || 380;
+    } catch {}
+    return 380;
+  });
+  const [isResizingDepth, setIsResizingDepth] = useState(false);
+
+  const handleDepthMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsResizingDepth(true);
+  };
+
+  useEffect(() => {
+    if (!isResizingDepth) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const newWidth = window.innerWidth - e.clientX;
+      const clamped = Math.min(700, Math.max(260, newWidth));
+      setDepthPanelWidth(clamped);
+      try { localStorage.setItem("chart_depth_panel_width", String(clamped)); } catch {}
+    };
+
+    const handleMouseUp = () => {
+      setIsResizingDepth(false);
+    };
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [isResizingDepth]);
+
   // Save selections to localStorage
   useEffect(() => {
     localStorage.setItem("binance_activeTab", activeTab);
@@ -433,15 +470,32 @@ export function App() {
                 </div>
               </div>
 
-              {/* Right Collapsible 20-Depth Panel with Smooth Slide Animation */}
+              {/* Resizer Handle Bar for Right Depth Panel */}
+              {showDepthPanel && (
+                <div
+                  onMouseDown={handleDepthMouseDown}
+                  style={{
+                    width: "4px",
+                    cursor: "col-resize",
+                    background: isResizingDepth ? "var(--accent-cyan)" : "transparent",
+                    borderLeft: isResizingDepth ? "1px solid var(--accent-cyan)" : "1px solid transparent",
+                    transition: "background 0.15s ease",
+                    zIndex: 30,
+                    userSelect: "none",
+                  }}
+                  title="Drag to resize Order Book Microstructure sidebar"
+                />
+              )}
+
+              {/* Right Collapsible & Resizable 20-Depth Panel with Smooth Slide Animation */}
               <div
                 style={{
-                  width: showDepthPanel ? "350px" : "0px",
-                  minWidth: showDepthPanel ? "350px" : "0px",
+                  width: showDepthPanel ? `${depthPanelWidth}px` : "0px",
+                  minWidth: showDepthPanel ? `${depthPanelWidth}px` : "0px",
                   opacity: showDepthPanel ? 1 : 0,
                   visibility: showDepthPanel ? "visible" : "hidden",
                   overflow: "hidden",
-                  transition: "all 0.28s cubic-bezier(0.4, 0, 0.2, 1)",
+                  transition: isResizingDepth ? "none" : "all 0.28s cubic-bezier(0.4, 0, 0.2, 1)",
                 }}
               >
                 <MarketDepthStream bids={tick?.bids || []} asks={tick?.asks || []} symbol={selectedSymbol} />
