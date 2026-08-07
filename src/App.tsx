@@ -334,88 +334,89 @@ export function App() {
 
       {/* 2. Main Flex Layout (Left Collapsible Nav + Main Content Area + Right Collapsible 20-Depth) */}
       <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
-        {/* Left Collapsible Navigation Sidebar */}
-        {showLeftSidebar && (
-          <aside
-            className="glass-panel"
-            style={{
-              width: "220px",
-              borderRadius: 0,
-              borderRight: "1px solid var(--border-color)",
-              borderTop: "none",
-              borderBottom: "none",
-              display: "flex",
-              flexDirection: "column",
-              gap: "6px",
-              padding: "16px 10px",
-              zIndex: 10,
-            }}
-          >
-            <div style={{ fontSize: "10px", color: "var(--text-muted)", fontWeight: 700, padding: "0 8px 8px 8px", letterSpacing: "0.5px" }}>
-              TERMINAL VIEWS
-            </div>
+        {/* Left Collapsible Navigation Sidebar with Smooth Slide Animation */}
+        <aside
+          style={{
+            width: showLeftSidebar ? "200px" : "0px",
+            minWidth: showLeftSidebar ? "200px" : "0px",
+            opacity: showLeftSidebar ? 1 : 0,
+            visibility: showLeftSidebar ? "visible" : "hidden",
+            background: "var(--bg-surface)",
+            borderRight: showLeftSidebar ? "1px solid var(--border-color)" : "1px solid transparent",
+            display: "flex",
+            flexDirection: "column",
+            gap: "4px",
+            padding: showLeftSidebar ? "12px 8px" : "12px 0px",
+            overflow: "hidden",
+            whiteSpace: "nowrap",
+            zIndex: 10,
+            transition: "all 0.28s cubic-bezier(0.4, 0, 0.2, 1)",
+          }}
+        >
+          <div style={{ fontSize: "10px", color: "var(--text-muted)", fontWeight: 700, padding: "0 8px 6px 8px", letterSpacing: "0.5px" }}>
+            TERMINAL VIEWS
+          </div>
 
-            {[
-              { id: "terminal", label: "Real-Time Terminal", icon: BarChart2 },
-              { id: "backtest", label: "Futures Backtest Workbench", icon: Activity },
-              { id: "intel", label: "Futures Intel & OI", icon: Layers },
-              { id: "bias", label: "Multi-Timeframe Bias", icon: TrendingUp },
-              { id: "portfolio", label: "Account & Ledger", icon: DollarSign },
-            ].map((t) => {
-              const Icon = t.icon;
-              const isActive = activeTab === t.id;
-              return (
-                <button
-                  key={t.id}
-                  onClick={() => setActiveTab(t.id as any)}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "10px",
-                    padding: "10px 12px",
-                    borderRadius: "8px",
-                    background: isActive ? "rgba(0, 245, 160, 0.1)" : "transparent",
-                    color: isActive ? "var(--accent-green)" : "var(--text-secondary)",
-                    border: isActive ? "1px solid rgba(0, 245, 160, 0.3)" : "1px solid transparent",
-                    fontSize: "12px",
-                    fontWeight: 600,
-                    cursor: "pointer",
-                    textAlign: "left",
-                    transition: "all 0.2s ease",
-                  }}
-                >
-                  <Icon size={16} />
-                  <span>{t.label}</span>
-                </button>
-              );
-            })}
-          </aside>
-        )}
+          {[
+            { id: "terminal", label: "Real-Time Terminal", icon: BarChart2 },
+            { id: "backtest", label: "Futures Backtest Workbench", icon: Activity },
+            { id: "intel", label: "Futures Intel & OI", icon: Layers },
+            { id: "bias", label: "Multi-Timeframe Bias", icon: TrendingUp },
+            { id: "portfolio", label: "Account & Ledger", icon: DollarSign },
+          ].map((t) => {
+            const Icon = t.icon;
+            const isActive = activeTab === t.id;
+            return (
+              <button
+                key={t.id}
+                onClick={() => setActiveTab(t.id as any)}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "10px",
+                  padding: "8px 10px",
+                  borderRadius: "6px",
+                  background: isActive ? "rgba(0, 245, 160, 0.1)" : "transparent",
+                  color: isActive ? "var(--accent-green)" : "var(--text-secondary)",
+                  border: isActive ? "1px solid rgba(0, 245, 160, 0.3)" : "1px solid transparent",
+                  fontSize: "12px",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  textAlign: "left",
+                  transition: "all 0.15s ease",
+                }}
+              >
+                <Icon size={15} />
+                <span>{t.label}</span>
+              </button>
+            );
+          })}
+        </aside>
 
         {/* Center Main Dashboard Area */}
-        <main style={{ flex: 1, padding: "16px 20px", display: "flex", flexDirection: "column", gap: "16px", overflowX: "hidden", minWidth: 0 }}>
+        <main style={{ flex: 1, padding: 0, display: "flex", flexDirection: "column", overflowX: "hidden", minWidth: 0 }}>
 
           {/* TAB 1: TERMINAL & CHART WITH OPTIONAL RIGHT 20-DEPTH SIDEBAR */}
           {activeTab === "terminal" && (
-            <div style={{ display: "grid", gridTemplateColumns: showDepthPanel ? "minmax(0, 1fr) 380px" : "minmax(0, 1fr)", gap: "16px", flex: 1, minHeight: "520px", minWidth: 0, width: "100%" }}>
+            <div style={{ display: "flex", flex: 1, minHeight: "520px", minWidth: 0, width: "100%", overflow: "hidden" }}>
               {/* Maximized Chart Canvas */}
-              <div className="glass-panel" style={{ padding: "14px", display: "flex", flexDirection: "column", gap: "10px", minWidth: 0, overflow: "hidden" }}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                  <div style={{ fontSize: "13px", fontWeight: 700, display: "flex", alignItems: "center", gap: "8px" }}>
-                    <BarChart2 size={16} color="var(--accent-cyan)" />
+              <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, overflow: "hidden", background: "#0A0D14" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 12px", borderBottom: "1px solid var(--border-color)", background: "var(--bg-surface)" }}>
+                  <div style={{ fontSize: "12px", fontWeight: 700, display: "flex", alignItems: "center", gap: "8px" }}>
+                    <BarChart2 size={15} color="var(--accent-cyan)" />
                     <span>{selectedSymbol.toUpperCase()} Intraday Candlesticks (Auto-Date Normalization)</span>
                   </div>
-                  <div style={{ display: "flex", gap: "6px" }}>
+                  <div style={{ display: "flex", gap: "4px" }}>
                     {["1", "5", "15", "30", "60"].map((m) => (
                       <button
                         key={m}
                         onClick={() => setSelectedInterval(m)}
                         style={{
-                          padding: "4px 8px",
-                          fontSize: "11px",
-                          fontWeight: 600,
+                          padding: "3px 7px",
+                          fontSize: "10px",
+                          fontWeight: 700,
                           borderRadius: "4px",
-                          background: selectedInterval === m ? "var(--accent-cyan)" : "rgba(255,255,255,0.05)",
+                          background: selectedInterval === m ? "var(--accent-cyan)" : "rgba(255,255,255,0.06)",
                           color: selectedInterval === m ? "#0A0D14" : "var(--text-secondary)",
                           border: "none",
                           cursor: "pointer",
@@ -432,10 +433,19 @@ export function App() {
                 </div>
               </div>
 
-              {/* Right Collapsible 20-Depth Panel */}
-              {showDepthPanel && (
+              {/* Right Collapsible 20-Depth Panel with Smooth Slide Animation */}
+              <div
+                style={{
+                  width: showDepthPanel ? "350px" : "0px",
+                  minWidth: showDepthPanel ? "350px" : "0px",
+                  opacity: showDepthPanel ? 1 : 0,
+                  visibility: showDepthPanel ? "visible" : "hidden",
+                  overflow: "hidden",
+                  transition: "all 0.28s cubic-bezier(0.4, 0, 0.2, 1)",
+                }}
+              >
                 <MarketDepthStream bids={tick?.bids || []} asks={tick?.asks || []} symbol={selectedSymbol} />
-              )}
+              </div>
             </div>
           )}
 

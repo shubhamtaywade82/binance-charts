@@ -30,7 +30,7 @@ export const MarketDepthStream: React.FC<MarketDepthProps> = ({ bids = [], asks 
   const spread = bestAsk > 0 && bestBid > 0 ? Number((bestAsk - bestBid).toFixed(2)) : 0;
 
   return (
-    <div className="glass-panel" style={{ padding: "16px", display: "flex", flexDirection: "column", gap: "14px", height: "100%" }}>
+    <div style={{ padding: "12px 14px", display: "flex", flexDirection: "column", gap: "12px", height: "100%", background: "var(--bg-surface)", borderLeft: "1px solid var(--border-color)" }}>
       {/* 1. Header & Live Indicator */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
