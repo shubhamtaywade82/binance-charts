@@ -18,14 +18,45 @@ export class WebSocketFeedService {
   private static binanceWsMap: Map<string, WebSocketClient> = new Map();
   private static depthPollerMap: Map<string, NodeJS.Timeout> = new Map();
   private static depthBySymbol: Map<string, DepthSnapshot> = new Map();
+  private static subscriberCounts: Map<string, number> = new Map();
 
   public static attach(wss: WebSocketServer): void {
     wss.on("connection", (ws: WebSocket) => {
       console.log("🔌 React UI WebSocket client connected");
 
+      let currentSymbolLower: string | null = null;
       let activeConfig = MarketDataService.getSymbolConfig("btcusdt");
       let lastSentPrice: number | null = null;
       let lastDepthSentAt = 0;
+
+      // Decrement reference count and cleanup Binance WebSocket stream if no active clients remain
+      const unsubscribeCurrent = () => {
+        if (!currentSymbolLower) return;
+        const count = (this.subscriberCounts.get(currentSymbolLower) || 1) - 1;
+        if (count <= 0) {
+          this.subscriberCounts.delete(currentSymbolLower);
+          this.cleanupSymbolStream(currentSymbolLower);
+        } else {
+          this.subscriberCounts.set(currentSymbolLower, count);
+        }
+        currentSymbolLower = null;
+      };
+
+      // Subscribe to symbol and increment reference count
+      const subscribeTo = (symbolStr: string) => {
+        unsubscribeCurrent();
+
+        activeConfig = MarketDataService.getSymbolConfig(symbolStr);
+        const newSymbolLower = activeConfig.id.toLowerCase();
+        currentSymbolLower = newSymbolLower;
+
+        const count = (this.subscriberCounts.get(newSymbolLower) || 0) + 1;
+        this.subscriberCounts.set(newSymbolLower, count);
+
+        this.ensureBinanceFuturesStreams(newSymbolLower, (livePrice) => {
+          activeConfig.basePrice = livePrice;
+        });
+      };
 
       const sendTick = () => {
         if (ws.readyState !== WebSocket.OPEN) return;
@@ -35,8 +66,6 @@ export class WebSocketFeedService {
         const depth = this.depthBySymbol.get(activeConfig.id.toLowerCase());
         const now = Date.now();
 
-        // Only push a tick when the real price changed, or when the order book
-        // refreshed (so the depth panel stays live without moving the price line).
         const priceChanged = currentPrice !== lastSentPrice;
         const depthRefreshed = depth !== undefined && now - lastDepthSentAt > 1000;
         if (!priceChanged && !depthRefreshed) return;
@@ -67,23 +96,39 @@ export class WebSocketFeedService {
         try {
           const parsed = JSON.parse(msg.toString());
           if (parsed.type === "subscribe" && parsed.symbol) {
-            activeConfig = MarketDataService.getSymbolConfig(parsed.symbol);
-            console.log(`📡 WebSocket client subscribed to Binance USD-M futures pair: ${activeConfig.name} (${activeConfig.id})`);
-            this.ensureBinanceFuturesStreams(activeConfig.id.toLowerCase(), (livePrice) => {
-              activeConfig.basePrice = livePrice;
-            });
+            console.log(`📡 WebSocket client subscribed to Binance USD-M futures pair: ${parsed.symbol}`);
+            subscribeTo(parsed.symbol);
           }
         } catch (e) {}
       });
 
       ws.on("close", () => {
         clearInterval(interval);
+        unsubscribeCurrent();
         console.log("🔌 React UI WebSocket client disconnected");
       });
     });
   }
 
-  /** Per symbol: real trade-print WS connection + 1s REST order-book poll (coherent top-20 snapshot). */
+  /** Close Binance WS & depth poller when symbol has 0 active client subscribers */
+  private static cleanupSymbolStream(symbolLower: string): void {
+    console.log(`🧹 Cleaning up Binance stream & depth poller for unused symbol: ${symbolLower}`);
+    const bWs = this.binanceWsMap.get(symbolLower);
+    if (bWs) {
+      try { bWs.close(); } catch (e) {}
+      this.binanceWsMap.delete(symbolLower);
+    }
+
+    const poller = this.depthPollerMap.get(symbolLower);
+    if (poller) {
+      clearInterval(poller);
+      this.depthPollerMap.delete(symbolLower);
+    }
+
+    this.depthBySymbol.delete(symbolLower);
+  }
+
+  /** Per symbol: real trade-print WS connection + 1s REST order-book poll */
   private static ensureBinanceFuturesStreams(symbolLower: string, onPrice: (p: number) => void): void {
     if (this.binanceWsMap.has(symbolLower)) return;
 

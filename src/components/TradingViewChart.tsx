@@ -199,6 +199,25 @@ export const sanitizeAndSortCandles = (raw: any[]): any[] => {
   return Array.from(map.values()).sort((a, b) => a.time - b.time);
 };
 
+export type DefaultScaleMode = "last_bars" | "fixed_spacing" | "fit_content";
+
+export interface ChartScaleSettings {
+  mode: DefaultScaleMode;
+  lastBarsCount: number;
+  barSpacing: number;
+  rightOffset: number;
+  isLogScale: boolean;
+  isUserSelectedFitAll?: boolean;
+}
+
+const DEFAULT_SCALE_SETTINGS: ChartScaleSettings = {
+  mode: "last_bars",
+  lastBarsCount: 120,
+  barSpacing: 10,
+  rightOffset: 8,
+  isLogScale: false,
+};
+
 export const TradingViewChart: React.FC<ChartProps> = ({
   symbol,
   interval,
@@ -275,6 +294,74 @@ export const TradingViewChart: React.FC<ChartProps> = ({
     } catch {}
     return { sma20: true, ema9: true };
   });
+
+  // Scaling & Zoom Settings State (persisted to localStorage)
+  const [scaleSettings, setScaleSettings] = useState<ChartScaleSettings>(() => {
+    try {
+      const saved = localStorage.getItem("chart_scale_settings");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.mode === "fit_content" && !parsed.isUserSelectedFitAll) {
+          return DEFAULT_SCALE_SETTINGS;
+        }
+        return { ...DEFAULT_SCALE_SETTINGS, ...parsed };
+      }
+    } catch {}
+    return DEFAULT_SCALE_SETTINGS;
+  });
+  const scaleSettingsRef = useRef(scaleSettings);
+  scaleSettingsRef.current = scaleSettings;
+
+  const applyScaleSettingsToChart = (settings: ChartScaleSettings) => {
+    if (!chartRef.current || !seriesRef.current || allCandlesRef.current.length === 0) return;
+    const chart = chartRef.current;
+    const timeScale = chart.timeScale();
+
+    try {
+      seriesRef.current.priceScale().applyOptions({
+        mode: settings.isLogScale ? 1 : 0,
+        autoScale: true,
+      });
+    } catch (e) {
+      console.warn("Price scale mode error:", e);
+    }
+
+    timeScale.applyOptions({ rightOffset: settings.rightOffset });
+
+    switch (settings.mode) {
+      case "fit_content":
+        timeScale.fitContent();
+        timeScale.applyOptions({ rightOffset: settings.rightOffset });
+        break;
+
+      case "last_bars": {
+        const totalBars = allCandlesRef.current.length;
+        const from = Math.max(0, totalBars - settings.lastBarsCount);
+        timeScale.setVisibleLogicalRange({
+          from,
+          to: totalBars + settings.rightOffset,
+        });
+        break;
+      }
+
+      case "fixed_spacing":
+        timeScale.applyOptions({
+          barSpacing: settings.barSpacing,
+          rightOffset: settings.rightOffset,
+        });
+        break;
+    }
+  };
+
+  const updateScaleSettings = (newSettings: Partial<ChartScaleSettings>) => {
+    setScaleSettings((prev) => {
+      const isUserFitAll = newSettings.mode === "fit_content" ? true : prev.isUserSelectedFitAll;
+      const updated = { ...prev, ...newSettings, isUserSelectedFitAll: isUserFitAll };
+      localStorage.setItem("chart_scale_settings", JSON.stringify(updated));
+      applyScaleSettingsToChart(updated);
+      return updated;
+    });
+  };
 
   const chartRef = useRef<any>(null);
   const seriesRef = useRef<any>(null);
@@ -603,6 +690,67 @@ export const TradingViewChart: React.FC<ChartProps> = ({
       try { localStorage.setItem("chart_show_setup_scan", String(next)); } catch {}
       return next;
     });
+  };
+
+  // Group Master Toggle Helpers
+  const isAnyInd = indicatorVisibility.sma20 || indicatorVisibility.ema9;
+  const toggleIndicatorsGroup = () => {
+    const nextVal = !isAnyInd;
+    if (smaSeriesRef.current) smaSeriesRef.current.applyOptions({ visible: nextVal });
+    if (emaSeriesRef.current) emaSeriesRef.current.applyOptions({ visible: nextVal });
+    const next = { sma20: nextVal, ema9: nextVal };
+    setIndicatorVisibility(next);
+    try { localStorage.setItem("chart_indicator_visibility", JSON.stringify(next)); } catch {}
+  };
+
+  const isAnySmc = showFVG || showOB || showStructure || showLiquidity || showEquilibrium;
+  const smcActiveCount = [showFVG, showOB, showStructure, showLiquidity, showEquilibrium].filter(Boolean).length;
+  const toggleSMCGroup = () => {
+    const nextVal = !isAnySmc;
+    setShowFVG(nextVal);
+    setShowOB(nextVal);
+    setShowStructure(nextVal);
+    setShowLiquidity(nextVal);
+    setShowEquilibrium(nextVal);
+    try {
+      localStorage.setItem("chart_show_fvg", String(nextVal));
+      localStorage.setItem("chart_show_ob", String(nextVal));
+      localStorage.setItem("chart_show_structure", String(nextVal));
+      localStorage.setItem("chart_show_liquidity", String(nextVal));
+      localStorage.setItem("chart_show_equilibrium", String(nextVal));
+    } catch {}
+  };
+
+  const isAnyIct = showICTSessions || showSilverBullet || showOTE || showJudas || showAMD;
+  const ictActiveCount = [showICTSessions, showSilverBullet, showOTE, showJudas, showAMD].filter(Boolean).length;
+  const toggleICTGroup = () => {
+    const nextVal = !isAnyIct;
+    setShowICTSessions(nextVal);
+    setShowSilverBullet(nextVal);
+    setShowOTE(nextVal);
+    setShowJudas(nextVal);
+    setShowAMD(nextVal);
+    try {
+      localStorage.setItem("chart_show_ict_sessions", String(nextVal));
+      localStorage.setItem("chart_show_silver_bullet", String(nextVal));
+      localStorage.setItem("chart_show_ote", String(nextVal));
+      localStorage.setItem("chart_show_judas", String(nextVal));
+      localStorage.setItem("chart_show_amd", String(nextVal));
+    } catch {}
+  };
+
+  const isAnyAdv = showSD || showTL || showCP;
+  const advActiveCount = [showSD, showTL, showCP].filter(Boolean).length;
+  const toggleAdvancedGroup = () => {
+    const nextVal = !isAnyAdv;
+    setShowSD(nextVal);
+    setShowTL(nextVal);
+    setShowCP(nextVal);
+    try {
+      localStorage.setItem("chart_show_sd", String(nextVal));
+      localStorage.setItem("chart_show_tl", String(nextVal));
+      localStorage.setItem("chart_show_cp", String(nextVal));
+    } catch {}
   };
 
   // ---- Indicator sets: grouped master toggles + independent per-indicator toggles ----
@@ -1787,8 +1935,7 @@ export const TradingViewChart: React.FC<ChartProps> = ({
             emaSeries.setData(emaData);
           }
 
-          chart.timeScale().fitContent();
-          chart.timeScale().applyOptions({ rightOffset: 5 });
+          applyScaleSettingsToChart(scaleSettingsRef.current);
 
           // Scroll listener for Lazy Loading & SMC Canvas Box redraw on scroll/zoom
           chart.timeScale().subscribeVisibleLogicalRangeChange(async (newRange: any) => {
@@ -2203,7 +2350,9 @@ export const TradingViewChart: React.FC<ChartProps> = ({
                 borderRadius: "8px",
                 border: "1px solid rgba(255, 255, 255, 0.15)",
                 boxShadow: "0 8px 24px rgba(0, 0, 0, 0.5)",
-                minWidth: "190px",
+                minWidth: "210px",
+                maxHeight: "calc(100vh - 140px)",
+                overflowY: "auto",
               }}>
                 {renderIndicatorSet(INDICATOR_SETS[0])}
 
@@ -2353,232 +2502,200 @@ export const TradingViewChart: React.FC<ChartProps> = ({
                     })()}
                   </select>
                 </div>
+
+                {/* DEFAULT SCALE & ZOOM SETTINGS SECTION */}
+                <div style={{
+                  fontSize: "10px",
+                  color: "var(--text-muted)",
+                  fontWeight: 700,
+                  letterSpacing: "0.5px",
+                  borderBottom: "1px solid rgba(255, 255, 255, 0.08)",
+                  paddingBottom: "4px",
+                  marginTop: "8px"
+                }}>
+                  DEFAULT SCALE & ZOOM
+                </div>
+
+                {/* Default Mode Selector */}
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", marginTop: "2px" }}>
+                  <span style={{ fontSize: "11px", fontWeight: 600, color: "#FFFFFF" }}>Zoom Mode</span>
+                  <select
+                    value={scaleSettings.mode}
+                    onChange={(e) => updateScaleSettings({ mode: e.target.value as DefaultScaleMode })}
+                    style={{
+                      background: "rgba(255, 255, 255, 0.06)",
+                      color: "var(--accent-cyan)",
+                      border: "1px solid rgba(255, 255, 255, 0.15)",
+                      borderRadius: "4px",
+                      padding: "2px 6px",
+                      fontSize: "10px",
+                      fontWeight: 700,
+                      cursor: "pointer",
+                    }}
+                  >
+                    <option value="last_bars">Last N Bars (Default)</option>
+                    <option value="fixed_spacing">Fixed Bar Width</option>
+                    <option value="fit_content">Fit All 500+ Bars (Zoom Out)</option>
+                  </select>
+                </div>
+
+                {/* Last N Bars Count */}
+                {scaleSettings.mode === "last_bars" && (
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
+                    <span style={{ fontSize: "11px", color: "var(--text-secondary)" }}>Visible Bars</span>
+                    <input
+                      type="number"
+                      min={20}
+                      max={500}
+                      step={10}
+                      value={scaleSettings.lastBarsCount}
+                      onChange={(e) => updateScaleSettings({ lastBarsCount: Math.max(10, Number(e.target.value)) })}
+                      style={{
+                        width: "55px",
+                        background: "rgba(255, 255, 255, 0.08)",
+                        color: "#FFF",
+                        border: "1px solid rgba(255, 255, 255, 0.15)",
+                        borderRadius: "4px",
+                        padding: "2px 4px",
+                        fontSize: "10px",
+                      }}
+                    />
+                  </div>
+                )}
+
+                {/* Fixed Bar Spacing */}
+                {scaleSettings.mode === "fixed_spacing" && (
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
+                    <span style={{ fontSize: "11px", color: "var(--text-secondary)" }}>Bar Width (px)</span>
+                    <input
+                      type="number"
+                      min={2}
+                      max={50}
+                      value={scaleSettings.barSpacing}
+                      onChange={(e) => updateScaleSettings({ barSpacing: Math.max(2, Number(e.target.value)) })}
+                      style={{
+                        width: "55px",
+                        background: "rgba(255, 255, 255, 0.08)",
+                        color: "#FFF",
+                        border: "1px solid rgba(255, 255, 255, 0.15)",
+                        borderRadius: "4px",
+                        padding: "2px 4px",
+                        fontSize: "10px",
+                      }}
+                    />
+                  </div>
+                )}
+
+                {/* Right Margin Offset */}
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
+                  <span style={{ fontSize: "11px", color: "var(--text-secondary)" }}>Right Margin (Bars)</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={50}
+                    value={scaleSettings.rightOffset}
+                    onChange={(e) => updateScaleSettings({ rightOffset: Math.max(0, Number(e.target.value)) })}
+                    style={{
+                      width: "55px",
+                      background: "rgba(255, 255, 255, 0.08)",
+                      color: "#FFF",
+                      border: "1px solid rgba(255, 255, 255, 0.15)",
+                      borderRadius: "4px",
+                      padding: "2px 4px",
+                      fontSize: "10px",
+                    }}
+                  />
+                </div>
+
+                {/* Logarithmic Scale Toggle */}
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px", marginTop: "2px" }}>
+                  <span style={{ fontSize: "11px", fontWeight: 600, color: scaleSettings.isLogScale ? "var(--accent-cyan)" : "var(--text-muted)" }}>
+                    Log Scale (LOG)
+                  </span>
+                  <button
+                    onClick={() => updateScaleSettings({ isLogScale: !scaleSettings.isLogScale })}
+                    style={{
+                      background: scaleSettings.isLogScale ? "rgba(0, 229, 255, 0.2)" : "rgba(255, 255, 255, 0.06)",
+                      border: scaleSettings.isLogScale ? "1px solid var(--accent-cyan)" : "1px solid rgba(255, 255, 255, 0.15)",
+                      color: scaleSettings.isLogScale ? "var(--accent-cyan)" : "var(--text-muted)",
+                      padding: "2px 8px",
+                      borderRadius: "4px",
+                      fontSize: "10px",
+                      fontWeight: 700,
+                      cursor: "pointer",
+                      transition: "all 0.2s ease",
+                    }}
+                  >
+                    {scaleSettings.isLogScale ? "ON" : "OFF"}
+                  </button>
+                </div>
               </div>
             )}
           </div>
 
           <span style={{ color: "rgba(255, 255, 255, 0.2)" }}>•</span>
 
-          {/* SMA 20 Quick Eye Badge */}
+          {/* GROUP 1: MOVING AVERAGES */}
           <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-            <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#00E5FF" }} />
-            <span style={{ fontSize: "10px", fontWeight: 700, color: indicatorVisibility.sma20 ? "#00E5FF" : "var(--text-muted)" }}>SMA 20</span>
+            <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: isAnyInd ? "#00E5FF" : "var(--text-muted)" }} />
+            <span style={{ fontSize: "10px", fontWeight: 700, color: isAnyInd ? "#00E5FF" : "var(--text-muted)" }}>MA (2)</span>
             <button
-              onClick={() => toggleIndicator("sma20")}
-              style={{ background: "transparent", border: "none", color: indicatorVisibility.sma20 ? "var(--accent-cyan)" : "var(--text-muted)", cursor: "pointer", padding: 0, display: "flex", alignItems: "center" }}
-              title={indicatorVisibility.sma20 ? "Hide SMA 20" : "Show SMA 20"}
+              onClick={toggleIndicatorsGroup}
+              style={{ background: "transparent", border: "none", color: isAnyInd ? "var(--accent-cyan)" : "var(--text-muted)", cursor: "pointer", padding: 0, display: "flex", alignItems: "center" }}
+              title={isAnyInd ? "Hide All Moving Averages" : "Show All Moving Averages"}
             >
-              {indicatorVisibility.sma20 ? <Eye size={11} /> : <EyeOff size={11} />}
+              {isAnyInd ? <Eye size={11} /> : <EyeOff size={11} />}
             </button>
           </div>
 
           <span style={{ color: "rgba(255, 255, 255, 0.2)" }}>•</span>
 
-          {/* EMA 9 Quick Eye Badge */}
+          {/* GROUP 2: SMC ENGINE */}
           <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-            <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#FFD700" }} />
-            <span style={{ fontSize: "10px", fontWeight: 700, color: indicatorVisibility.ema9 ? "#FFD700" : "var(--text-muted)" }}>EMA 9</span>
+            <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: isAnySmc ? "#00F5A0" : "var(--text-muted)" }} />
+            <span style={{ fontSize: "10px", fontWeight: 700, color: isAnySmc ? "#00F5A0" : "var(--text-muted)" }}>
+              SMC ({smcActiveCount}/5)
+            </span>
             <button
-              onClick={() => toggleIndicator("ema9")}
-              style={{ background: "transparent", border: "none", color: indicatorVisibility.ema9 ? "#FFD700" : "var(--text-muted)", cursor: "pointer", padding: 0, display: "flex", alignItems: "center" }}
-              title={indicatorVisibility.ema9 ? "Hide EMA 9" : "Show EMA 9"}
+              onClick={toggleSMCGroup}
+              style={{ background: "transparent", border: "none", color: isAnySmc ? "#00F5A0" : "var(--text-muted)", cursor: "pointer", padding: 0, display: "flex", alignItems: "center" }}
+              title={isAnySmc ? "Hide All SMC Overlay Tools" : "Show All SMC Overlay Tools"}
             >
-              {indicatorVisibility.ema9 ? <Eye size={11} /> : <EyeOff size={11} />}
+              {isAnySmc ? <Eye size={11} /> : <EyeOff size={11} />}
             </button>
           </div>
 
           <span style={{ color: "rgba(255, 255, 255, 0.2)" }}>•</span>
 
-          {/* SMC FVG Quick Eye Badge */}
+          {/* GROUP 3: ICT ENGINE */}
           <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-            <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: showFVG ? "#00F5A0" : "var(--text-muted)" }} />
-            <span style={{ fontSize: "10px", fontWeight: 700, color: showFVG ? "#00F5A0" : "var(--text-muted)" }}>SMC FVG</span>
+            <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: isAnyIct ? "#9333EA" : "var(--text-muted)" }} />
+            <span style={{ fontSize: "10px", fontWeight: 700, color: isAnyIct ? "#9333EA" : "var(--text-muted)" }}>
+              ICT ({ictActiveCount}/5)
+            </span>
             <button
-              onClick={toggleFVG}
-              style={{ background: "transparent", border: "none", color: showFVG ? "var(--accent-green)" : "var(--text-muted)", cursor: "pointer", padding: 0, display: "flex", alignItems: "center" }}
-              title={showFVG ? "Hide Fair Value Gaps" : "Show Fair Value Gaps"}
+              onClick={toggleICTGroup}
+              style={{ background: "transparent", border: "none", color: isAnyIct ? "#9333EA" : "var(--text-muted)", cursor: "pointer", padding: 0, display: "flex", alignItems: "center" }}
+              title={isAnyIct ? "Hide All ICT Tools & Windows" : "Show All ICT Tools & Windows"}
             >
-              {showFVG ? <Eye size={11} /> : <EyeOff size={11} />}
+              {isAnyIct ? <Eye size={11} /> : <EyeOff size={11} />}
             </button>
           </div>
 
           <span style={{ color: "rgba(255, 255, 255, 0.2)" }}>•</span>
 
-          {/* SMC OB Quick Eye Badge */}
+          {/* GROUP 4: ADVANCED TOOLS */}
           <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-            <span style={{ width: "6px", height: "6px", borderRadius: "2px", background: showOB ? "#FF495C" : "var(--text-muted)" }} />
-            <span style={{ fontSize: "10px", fontWeight: 700, color: showOB ? "#FF495C" : "var(--text-muted)" }}>SMC OB</span>
+            <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: isAnyAdv ? "#FFD700" : "var(--text-muted)" }} />
+            <span style={{ fontSize: "10px", fontWeight: 700, color: isAnyAdv ? "#FFD700" : "var(--text-muted)" }}>
+              ADVANCED ({advActiveCount}/3)
+            </span>
             <button
-              onClick={toggleOB}
-              style={{ background: "transparent", border: "none", color: showOB ? "#FF495C" : "var(--text-muted)", cursor: "pointer", padding: 0, display: "flex", alignItems: "center" }}
-              title={showOB ? "Hide Order Blocks" : "Show Order Blocks"}
+              onClick={toggleAdvancedGroup}
+              style={{ background: "transparent", border: "none", color: isAnyAdv ? "#FFD700" : "var(--text-muted)", cursor: "pointer", padding: 0, display: "flex", alignItems: "center" }}
+              title={isAnyAdv ? "Hide All Supply/Demand & Pattern Tools" : "Show All Supply/Demand & Pattern Tools"}
             >
-              {showOB ? <Eye size={11} /> : <EyeOff size={11} />}
-            </button>
-          </div>
-
-          <span style={{ color: "rgba(255, 255, 255, 0.2)" }}>•</span>
-
-          {/* SMC Struct Quick Eye Badge */}
-          <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-            <span style={{ width: "8px", height: "2px", background: showStructure ? "#00F5A0" : "var(--text-muted)" }} />
-            <span style={{ fontSize: "10px", fontWeight: 700, color: showStructure ? "#00F5A0" : "var(--text-muted)" }}>SMC Struct</span>
-            <button
-              onClick={toggleStructure}
-              style={{ background: "transparent", border: "none", color: showStructure ? "#00F5A0" : "var(--text-muted)", cursor: "pointer", padding: 0, display: "flex", alignItems: "center" }}
-              title={showStructure ? "Hide Market Structure" : "Show Market Structure"}
-            >
-              {showStructure ? <Eye size={11} /> : <EyeOff size={11} />}
-            </button>
-          </div>
-
-          <span style={{ color: "rgba(255, 255, 255, 0.2)" }}>•</span>
-
-          {/* SMC Liq Quick Eye Badge */}
-          <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-            <span style={{ width: "8px", height: "2px", background: showLiquidity ? "#00E5FF" : "var(--text-muted)" }} />
-            <span style={{ fontSize: "10px", fontWeight: 700, color: showLiquidity ? "#00E5FF" : "var(--text-muted)" }}>SMC Liq</span>
-            <button
-              onClick={toggleLiquidity}
-              style={{ background: "transparent", border: "none", color: showLiquidity ? "var(--accent-cyan)" : "var(--text-muted)", cursor: "pointer", padding: 0, display: "flex", alignItems: "center" }}
-              title={showLiquidity ? "Hide Liquidity Pools & Sweeps" : "Show Liquidity Pools & Sweeps"}
-            >
-              {showLiquidity ? <Eye size={11} /> : <EyeOff size={11} />}
-            </button>
-          </div>
-
-          <span style={{ color: "rgba(255, 255, 255, 0.2)" }}>•</span>
-
-          {/* SMC P/D Quick Eye Badge */}
-          <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-            <span style={{ width: "8px", height: "2px", background: showEquilibrium ? "#FFD700" : "var(--text-muted)" }} />
-            <span style={{ fontSize: "10px", fontWeight: 700, color: showEquilibrium ? "#FFD700" : "var(--text-muted)" }}>SMC P/D</span>
-            <button
-              onClick={toggleEquilibrium}
-              style={{ background: "transparent", border: "none", color: showEquilibrium ? "#FFD700" : "var(--text-muted)", cursor: "pointer", padding: 0, display: "flex", alignItems: "center" }}
-              title={showEquilibrium ? "Hide Equilibrium & P/D Zones" : "Show Equilibrium & P/D Zones"}
-            >
-              {showEquilibrium ? <Eye size={11} /> : <EyeOff size={11} />}
-            </button>
-          </div>
-
-          <span style={{ color: "rgba(255, 255, 255, 0.2)" }}>•</span>
-
-          {/* ICT Sessions Quick Eye Badge */}
-          <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-            <span style={{ width: "6px", height: "6px", borderRadius: "2px", background: showICTSessions ? "#9333EA" : "var(--text-muted)" }} />
-            <span style={{ fontSize: "10px", fontWeight: 700, color: showICTSessions ? "#9333EA" : "var(--text-muted)" }}>ICT Sessions</span>
-            <button
-              onClick={toggleICTSessions}
-              style={{ background: "transparent", border: "none", color: showICTSessions ? "#9333EA" : "var(--text-muted)", cursor: "pointer", padding: 0, display: "flex", alignItems: "center" }}
-              title={showICTSessions ? "Hide ICT Kill Zones" : "Show ICT Kill Zones"}
-            >
-              {showICTSessions ? <Eye size={11} /> : <EyeOff size={11} />}
-            </button>
-          </div>
-
-          <span style={{ color: "rgba(255, 255, 255, 0.2)" }}>•</span>
-
-          {/* ICT SB Quick Eye Badge */}
-          <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-            <span style={{ width: "6px", height: "6px", borderRadius: "2px", background: showSilverBullet ? "#FFD700" : "var(--text-muted)" }} />
-            <span style={{ fontSize: "10px", fontWeight: 700, color: showSilverBullet ? "#FFD700" : "var(--text-muted)" }}>ICT SB 🎯</span>
-            <button
-              onClick={toggleSilverBullet}
-              style={{ background: "transparent", border: "none", color: showSilverBullet ? "#FFD700" : "var(--text-muted)", cursor: "pointer", padding: 0, display: "flex", alignItems: "center" }}
-              title={showSilverBullet ? "Hide Silver Bullet Windows" : "Show Silver Bullet Windows"}
-            >
-              {showSilverBullet ? <Eye size={11} /> : <EyeOff size={11} />}
-            </button>
-          </div>
-
-          <span style={{ color: "rgba(255, 255, 255, 0.2)" }}>•</span>
-
-          {/* ICT OTE Quick Eye Badge */}
-          <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-            <span style={{ width: "8px", height: "2px", background: showOTE ? "var(--accent-cyan)" : "var(--text-muted)" }} />
-            <span style={{ fontSize: "10px", fontWeight: 700, color: showOTE ? "var(--accent-cyan)" : "var(--text-muted)" }}>ICT OTE ⭐</span>
-            <button
-              onClick={toggleOTE}
-              style={{ background: "transparent", border: "none", color: showOTE ? "var(--accent-cyan)" : "var(--text-muted)", cursor: "pointer", padding: 0, display: "flex", alignItems: "center" }}
-              title={showOTE ? "Hide Optimal Trade Entry Zone" : "Show Optimal Trade Entry Zone"}
-            >
-              {showOTE ? <Eye size={11} /> : <EyeOff size={11} />}
-            </button>
-          </div>
-
-          <span style={{ color: "rgba(255, 255, 255, 0.2)" }}>•</span>
-
-          {/* ICT Judas Quick Eye Badge */}
-          <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-            <span style={{ width: "6px", height: "6px", borderRadius: "2px", background: showJudas ? "#FF495C" : "var(--text-muted)" }} />
-            <span style={{ fontSize: "10px", fontWeight: 700, color: showJudas ? "#FF495C" : "var(--text-muted)" }}>ICT Judas ⚡</span>
-            <button
-              onClick={toggleJudas}
-              style={{ background: "transparent", border: "none", color: showJudas ? "#FF495C" : "var(--text-muted)", cursor: "pointer", padding: 0, display: "flex", alignItems: "center" }}
-              title={showJudas ? "Hide Judas Swing Alerts" : "Show Judas Swing Alerts"}
-            >
-              {showJudas ? <Eye size={11} /> : <EyeOff size={11} />}
-            </button>
-          </div>
-
-          <span style={{ color: "rgba(255, 255, 255, 0.2)" }}>•</span>
-
-          {/* ICT AMD Power of 3 Quick Eye Badge */}
-          <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-            <span style={{ width: "6px", height: "6px", borderRadius: "2px", background: showAMD ? "#FFAA00" : "var(--text-muted)" }} />
-            <span style={{ fontSize: "10px", fontWeight: 700, color: showAMD ? "#FFAA00" : "var(--text-muted)" }}>AMD (A→M→D)</span>
-            <button
-              onClick={toggleAMD}
-              style={{ background: "transparent", border: "none", color: showAMD ? "#FFAA00" : "var(--text-muted)", cursor: "pointer", padding: 0, display: "flex", alignItems: "center" }}
-              title={showAMD ? "Hide AMD Power of 3" : "Show AMD Power of 3"}
-            >
-              {showAMD ? <Eye size={11} /> : <EyeOff size={11} />}
-            </button>
-          </div>
-
-          <span style={{ color: "rgba(255, 255, 255, 0.2)" }}>•</span>
-
-          {/* S&D Zones Quick Eye Badge */}
-          <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-            <span style={{ width: "6px", height: "6px", borderRadius: "2px", background: showSD ? "#00F5A0" : "var(--text-muted)" }} />
-            <span style={{ fontSize: "10px", fontWeight: 700, color: showSD ? "#00F5A0" : "var(--text-muted)" }}>S&D Zones</span>
-            <button
-              onClick={toggleSD}
-              style={{ background: "transparent", border: "none", color: showSD ? "#00F5A0" : "var(--text-muted)", cursor: "pointer", padding: 0, display: "flex", alignItems: "center" }}
-              title={showSD ? "Hide Supply & Demand Zones" : "Show Supply & Demand Zones"}
-            >
-              {showSD ? <Eye size={11} /> : <EyeOff size={11} />}
-            </button>
-          </div>
-
-          <span style={{ color: "rgba(255, 255, 255, 0.2)" }}>•</span>
-
-          {/* Trendline Liquidity Quick Eye Badge */}
-          <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-            <span style={{ width: "10px", height: "2px", background: showTL ? "#00F5A0" : "var(--text-muted)", borderRadius: "1px" }} />
-            <span style={{ fontSize: "10px", fontWeight: 700, color: showTL ? "#00F5A0" : "var(--text-muted)" }}>TL Liq.</span>
-            <button
-              onClick={toggleTL}
-              style={{ background: "transparent", border: "none", color: showTL ? "#00F5A0" : "var(--text-muted)", cursor: "pointer", padding: 0, display: "flex", alignItems: "center" }}
-              title={showTL ? "Hide Trendline Liquidity" : "Show Trendline Liquidity"}
-            >
-              {showTL ? <Eye size={11} /> : <EyeOff size={11} />}
-            </button>
-          </div>
-
-          <span style={{ color: "rgba(255, 255, 255, 0.2)" }}>•</span>
-
-          {/* Candlestick Patterns Quick Eye Badge */}
-          <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-            <span style={{ fontSize: "9px" }}>🔨</span>
-            <span style={{ fontSize: "10px", fontWeight: 700, color: showCP ? "#FFD700" : "var(--text-muted)" }}>Patterns</span>
-            <button
-              onClick={toggleCP}
-              style={{ background: "transparent", border: "none", color: showCP ? "#FFD700" : "var(--text-muted)", cursor: "pointer", padding: 0, display: "flex", alignItems: "center" }}
-              title={showCP ? "Hide Candlestick Patterns" : "Show Candlestick Patterns"}
-            >
-              {showCP ? <Eye size={11} /> : <EyeOff size={11} />}
+              {isAnyAdv ? <Eye size={11} /> : <EyeOff size={11} />}
             </button>
           </div>
         </div>
@@ -2836,6 +2953,60 @@ export const TradingViewChart: React.FC<ChartProps> = ({
           zIndex: 10,
         }}
       />
+
+      {/* TRADINGVIEW-STYLE BOTTOM RIGHT QUICK SCALE OVERLAY */}
+      <div style={{
+        position: "absolute",
+        bottom: "32px",
+        right: "75px",
+        zIndex: 15,
+        display: "flex",
+        gap: "4px",
+        background: "rgba(15, 19, 28, 0.85)",
+        backdropFilter: "blur(6px)",
+        WebkitBackdropFilter: "blur(6px)",
+        padding: "2px 4px",
+        borderRadius: "4px",
+        border: "1px solid rgba(255, 255, 255, 0.12)",
+      }}>
+        {/* LOG Scale Button */}
+        <button
+          title="Toggle Logarithmic Scale"
+          onClick={() => updateScaleSettings({ isLogScale: !scaleSettings.isLogScale })}
+          style={{
+            background: scaleSettings.isLogScale ? "var(--accent-cyan)" : "transparent",
+            color: scaleSettings.isLogScale ? "#0F131C" : "var(--text-muted)",
+            border: "none",
+            borderRadius: "3px",
+            fontSize: "10px",
+            fontWeight: 800,
+            padding: "2px 6px",
+            cursor: "pointer",
+            transition: "all 0.15s ease",
+          }}
+        >
+          LOG
+        </button>
+
+        {/* Reset/Auto Scale Button */}
+        <button
+          title="Reset Scale to Default Setting"
+          onClick={() => applyScaleSettingsToChart(scaleSettings)}
+          style={{
+            background: "transparent",
+            color: "var(--text-secondary)",
+            border: "none",
+            borderRadius: "3px",
+            fontSize: "10px",
+            fontWeight: 800,
+            padding: "2px 6px",
+            cursor: "pointer",
+            transition: "all 0.15s ease",
+          }}
+        >
+          AUTO
+        </button>
+      </div>
 
       {/* Canvas Container */}
       <div ref={chartContainerRef} style={{ width: "100%", height: "100%", minHeight: "520px" }} />
