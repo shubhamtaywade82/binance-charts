@@ -9,7 +9,7 @@ import {
   IPriceLine,
   CrosshairMode,
 } from "lightweight-charts";
-import { Clock, Eye, EyeOff, ChevronDown, ChevronUp, Sliders, Layers } from "lucide-react";
+import { Clock, Eye, EyeOff, ChevronDown, ChevronUp, Sliders, Layers, Palette } from "lucide-react";
 import {
   detectFVGs,
   detectOrderBlocks,
@@ -28,6 +28,8 @@ import {
   TrendlineLiquidity,
   CandlestickPattern,
   CandlestickPatternType,
+  detectVolumeProfile,
+  VolumeProfileResult,
 } from "../utils/smcEngine";
 
 export function getPricePrecision(price: number): { precision: number; minMove: number } {
@@ -309,7 +311,24 @@ export const TradingViewChart: React.FC<ChartProps> = ({
   };
 
   // Indicator Management State (SMA 20 & EMA 9) — persisted to localStorage
-  const [showIndicatorsPanel, setShowIndicatorsPanel] = useState(false);
+  const [showIndicatorsPanel, setShowIndicatorsPanel] = useState<boolean>(false);
+  const [showThemePanel, setShowThemePanel] = useState<boolean>(false);
+  const indicatorsPanelRef = useRef<HTMLDivElement>(null);
+  const themePanelRef = useRef<HTMLDivElement>(null);
+
+  // Close both dropdowns on click-outside
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (indicatorsPanelRef.current && !indicatorsPanelRef.current.contains(e.target as Node)) {
+        setShowIndicatorsPanel(false);
+      }
+      if (themePanelRef.current && !themePanelRef.current.contains(e.target as Node)) {
+        setShowThemePanel(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
   const [indicatorVisibility, setIndicatorVisibility] = useState(() => {
     try {
       const saved = localStorage.getItem("chart_indicator_visibility");
@@ -576,6 +595,22 @@ export const TradingViewChart: React.FC<ChartProps> = ({
     setShowEquilibrium((prev) => {
       const next = !prev;
       try { localStorage.setItem("chart_show_equilibrium", String(next)); } catch {}
+      return next;
+    });
+  };
+
+  // Volume Profile (VPVR, POC, VAH, VAL) State
+  const [showVolumeProfile, setShowVolumeProfile] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem("chart_show_volume_profile") !== "false";
+    } catch {}
+    return true;
+  });
+
+  const toggleVolumeProfile = () => {
+    setShowVolumeProfile((prev) => {
+      const next = !prev;
+      try { localStorage.setItem("chart_show_volume_profile", String(next)); } catch {}
       return next;
     });
   };
@@ -852,11 +887,12 @@ export const TradingViewChart: React.FC<ChartProps> = ({
     sd: { label: "Supply & Demand Zones", color: "#00F5A0", get: () => showSD, set: (v) => { persistIndicator("chart_show_sd", v); setShowSD(v); } },
     tl: { label: "Trendline Liquidity (S/R)", color: "#00F5A0", get: () => showTL, set: (v) => { persistIndicator("chart_show_tl", v); setShowTL(v); } },
     cp: { label: "Candlestick Patterns", color: "#FFD700", icon: "🔨", get: () => showCP, set: (v) => { persistIndicator("chart_show_cp", v); setShowCP(v); } },
+    volumeProfile: { label: "Volume Profile (VPVR, POC, VAH, VAL)", color: "#FFD700", get: () => showVolumeProfile, set: (v) => { persistIndicator("chart_show_volume_profile", v); setShowVolumeProfile(v); } },
   };
 
   const INDICATOR_SETS: IndicatorSetDef[] = [
     { id: "ma", label: "MOVING AVERAGES", keys: ["sma20", "ema9"] },
-    { id: "smc", label: "SMART MONEY CONCEPTS (SMC)", keys: ["fvg", "ob", "structure", "liquidity", "equilibrium"] },
+    { id: "smc", label: "SMART MONEY CONCEPTS (SMC)", keys: ["fvg", "ob", "structure", "liquidity", "equilibrium", "volumeProfile"] },
     { id: "ict", label: "ICT", keys: ["ictSessions", "silverBullet", "ote", "judas", "amd"] },
     { id: "pa", label: "PRICE ACTION", keys: ["sd", "tl", "cp"] },
   ];
@@ -1113,7 +1149,7 @@ export const TradingViewChart: React.FC<ChartProps> = ({
   }, [
     showFVG, showOB, showStructure, showLiquidity, showEquilibrium,
     showICTSessions, showSilverBullet, showOTE, showJudas, showAMD,
-    showSD, showTL, showCP,
+    showSD, showTL, showCP, showVolumeProfile,
   ]);
 
   // Latest overlay visibility flags, read from refs inside drawSMCBoxes so the
@@ -1121,7 +1157,7 @@ export const TradingViewChart: React.FC<ChartProps> = ({
   const smcFlagsRef = useRef({
     fvg: true, ob: true, structure: true, liquidity: true, equilibrium: true,
     ictSessions: true, silverBullet: true, ote: true, judas: true, amd: true,
-    sd: true, tl: true, cp: true,
+    sd: true, tl: true, cp: true, volumeProfile: true,
   });
   smcFlagsRef.current = {
     fvg: showFVG,
@@ -1137,6 +1173,7 @@ export const TradingViewChart: React.FC<ChartProps> = ({
     sd: showSD,
     tl: showTL,
     cp: showCP,
+    volumeProfile: showVolumeProfile,
   };
 
   const smcCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -1310,7 +1347,7 @@ export const TradingViewChart: React.FC<ChartProps> = ({
 
           if (lineWidth <= 5 || startX >= maxVisibleX) return;
 
-          const color = isBSL ? "#00E5FF" : "#EC4899";
+          const color = isBSL ? "#FF495C" : "#00F5A0";
           ctx.strokeStyle = color;
           ctx.lineWidth = pool.swept ? 1.5 : 1.0;
 
@@ -1877,6 +1914,110 @@ export const TradingViewChart: React.FC<ChartProps> = ({
           ctx.textAlign = "left";
           ctx.textBaseline = "middle";
           ctx.fillText(spreadLabelText, spreadX + 8, midY);
+        }
+      } catch (e) {}
+    }
+
+    // 14. Render Volume Profile (VPVR), POC, VAH & VAL
+    if (smcFlagsRef.current.volumeProfile && allCandlesRef.current.length > 5) {
+      try {
+        const vpResult = detectVolumeProfile(allCandlesRef.current.slice(-500), 32, 0.70);
+        if (vpResult && vpResult.buckets.length > 0) {
+          const maxHistWidth = 110;
+          const startX = 4;
+
+          // Render Volume Histogram Buckets
+          vpResult.buckets.forEach((b) => {
+            const yTop = series.priceToCoordinate(b.priceTop);
+            const yBottom = series.priceToCoordinate(b.priceBottom);
+
+            if (yTop !== null && yBottom !== null && !isNaN(yTop) && !isNaN(yBottom)) {
+              const h = Math.max(2, Math.abs(yBottom - yTop));
+              const topY = Math.min(yTop, yBottom);
+
+              const buyWidth = Math.round((b.buyVolume / vpResult.maxBucketVolume) * maxHistWidth);
+              const sellWidth = Math.round((b.sellVolume / vpResult.maxBucketVolume) * maxHistWidth);
+
+              const alpha = b.isValueArea ? 0.35 : 0.15;
+
+              // Buy Volume (Green)
+              ctx.fillStyle = `rgba(0, 245, 160, ${alpha})`;
+              ctx.fillRect(startX, topY, buyWidth, h - 1);
+
+              // Sell Volume (Red)
+              ctx.fillStyle = `rgba(255, 73, 92, ${alpha})`;
+              ctx.fillRect(startX + buyWidth, topY, sellWidth, h - 1);
+
+              // Value Area Border / Highlighting
+              if (b.isValueArea) {
+                ctx.strokeStyle = "rgba(0, 229, 255, 0.25)";
+                ctx.lineWidth = 1;
+                ctx.strokeRect(startX, topY, buyWidth + sellWidth, h - 1);
+              }
+            }
+          });
+
+          // Render POC Line (Point of Control — Bright Amber Gold)
+          const pocY = series.priceToCoordinate(vpResult.pocPrice);
+          if (pocY !== null && !isNaN(pocY)) {
+            const prec = getPricePrecision(vpResult.pocPrice).precision;
+            const pocText = `POC $${formatPriceDynamic(vpResult.pocPrice, prec)}`;
+
+            ctx.strokeStyle = "#FFD700";
+            ctx.lineWidth = 2;
+            ctx.setLineDash([]);
+            ctx.beginPath();
+            ctx.moveTo(startX, pocY);
+            ctx.lineTo(width - 60, pocY);
+            ctx.stroke();
+
+            // Label
+            ctx.fillStyle = "#FFD700";
+            ctx.font = "bold 10px monospace";
+            ctx.textAlign = "left";
+            ctx.fillText(pocText, startX + 6, pocY - 4);
+          }
+
+          // Render VAH Line (Value Area High — Cyan Dotted Line)
+          const vahY = series.priceToCoordinate(vpResult.vahPrice);
+          if (vahY !== null && !isNaN(vahY)) {
+            const prec = getPricePrecision(vpResult.vahPrice).precision;
+            const vahText = `VAH $${formatPriceDynamic(vpResult.vahPrice, prec)}`;
+
+            ctx.strokeStyle = "#00E5FF";
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([4, 4]);
+            ctx.beginPath();
+            ctx.moveTo(startX, vahY);
+            ctx.lineTo(width - 60, vahY);
+            ctx.stroke();
+
+            ctx.fillStyle = "#00E5FF";
+            ctx.font = "bold 9px monospace";
+            ctx.textAlign = "left";
+            ctx.fillText(vahText, startX + 6, vahY - 3);
+          }
+
+          // Render VAL Line (Value Area Low — Purple Dotted Line)
+          const valY = series.priceToCoordinate(vpResult.valPrice);
+          if (valY !== null && !isNaN(valY)) {
+            const prec = getPricePrecision(vpResult.valPrice).precision;
+            const valText = `VAL $${formatPriceDynamic(vpResult.valPrice, prec)}`;
+
+            ctx.strokeStyle = "#A855F7";
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([4, 4]);
+            ctx.beginPath();
+            ctx.moveTo(startX, valY);
+            ctx.lineTo(width - 60, valY);
+            ctx.stroke();
+
+            ctx.fillStyle = "#A855F7";
+            ctx.font = "bold 9px monospace";
+            ctx.textAlign = "left";
+            ctx.fillText(valText, startX + 6, valY + 11);
+          }
+          ctx.setLineDash([]); // Reset line dash
         }
       } catch (e) {}
     }
@@ -2758,9 +2899,12 @@ export const TradingViewChart: React.FC<ChartProps> = ({
           width: "fit-content",
         }}>
           {/* INDICATORS DROPDOWN BUTTON */}
-          <div style={{ position: "relative" }}>
+          <div ref={indicatorsPanelRef} style={{ position: "relative" }}>
             <button
-              onClick={() => setShowIndicatorsPanel(!showIndicatorsPanel)}
+              onClick={() => {
+                setShowIndicatorsPanel(!showIndicatorsPanel);
+                if (showThemePanel) setShowThemePanel(false);
+              }}
               style={{
                 display: "flex",
                 alignItems: "center",
@@ -2803,70 +2947,9 @@ export const TradingViewChart: React.FC<ChartProps> = ({
                 overflowY: "auto",
               }}>
                 {renderIndicatorSet(INDICATOR_SETS[0])}
-
-                <div style={{ fontSize: "10px", color: "var(--text-muted)", fontWeight: 700, letterSpacing: "0.5px", borderBottom: "1px solid rgba(255, 255, 255, 0.08)", paddingBottom: "4px", marginTop: "6px" }}>
-                  CANDLE & VOLUME THEME
-                </div>
-
-                <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                  {Object.values(CANDLE_THEMES).map((theme) => {
-                    const isSelected = theme.id === selectedThemeId;
-                    return (
-                      <button
-                        key={theme.id}
-                        onClick={() => handleThemeChange(theme.id)}
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "space-between",
-                          padding: "4px 8px",
-                          borderRadius: "4px",
-                          background: isSelected ? "rgba(255, 255, 255, 0.12)" : "transparent",
-                          border: isSelected ? "1px solid rgba(255, 255, 255, 0.25)" : "1px solid transparent",
-                          cursor: "pointer",
-                          transition: "all 0.2s ease",
-                        }}
-                      >
-                        <span style={{ fontSize: "11px", fontWeight: isSelected ? 700 : 500, color: isSelected ? "#FFFFFF" : "var(--text-secondary)" }}>
-                          {theme.name}
-                        </span>
-                        <div style={{ display: "flex", alignItems: "center", gap: "3px" }}>
-                          <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: theme.upColor }} />
-                          <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: theme.downColor }} />
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
                 {renderIndicatorSet(INDICATOR_SETS[1])}
                 {renderIndicatorSet(INDICATOR_SETS[2])}
-
                 {renderIndicatorSet(INDICATOR_SETS[3])}
-                <div style={{ fontSize: "10px", color: "var(--text-muted)", fontWeight: 700, letterSpacing: "0.5px", borderBottom: "1px solid rgba(255, 255, 255, 0.08)", paddingBottom: "4px", marginTop: "8px" }}>
-                  CANDLE BODY STYLE
-                </div>
-
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px", marginTop: "2px" }}>
-                  <span style={{ fontSize: "11px", fontWeight: 600, color: isHollowMode ? "var(--accent-cyan)" : "#FFFFFF" }}>
-                    Hollow Candles
-                  </span>
-                  <button
-                    onClick={toggleHollowMode}
-                    style={{
-                      background: isHollowMode ? "rgba(0, 229, 255, 0.2)" : "rgba(255, 255, 255, 0.06)",
-                      border: isHollowMode ? "1px solid var(--accent-cyan)" : "1px solid rgba(255, 255, 255, 0.15)",
-                      color: isHollowMode ? "var(--accent-cyan)" : "var(--text-muted)",
-                      padding: "2px 8px",
-                      borderRadius: "4px",
-                      fontSize: "10px",
-                      fontWeight: 700,
-                      cursor: "pointer",
-                      transition: "all 0.2s ease",
-                    }}
-                  >
-                    {isHollowMode ? "HOLLOW" : "FILLED"}
-                  </button>
-                </div>
 
                 <div style={{ fontSize: "10px", color: "var(--text-muted)", fontWeight: 700, letterSpacing: "0.5px", borderBottom: "1px solid rgba(255, 255, 255, 0.08)", paddingBottom: "4px", marginTop: "8px" }}>
                   SETUP TOOLS
@@ -3076,6 +3159,126 @@ export const TradingViewChart: React.FC<ChartProps> = ({
                   >
                     {scaleSettings.isLogScale ? "ON" : "OFF"}
                   </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* DEDICATED CANDLE & VOLUME THEME DROPDOWN BUTTON */}
+          <div ref={themePanelRef} style={{ position: "relative" }}>
+            <button
+              onClick={() => {
+                setShowThemePanel(!showThemePanel);
+                if (showIndicatorsPanel) setShowIndicatorsPanel(false);
+              }}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "5px",
+                background: showThemePanel ? "rgba(255, 215, 0, 0.2)" : "rgba(255, 255, 255, 0.06)",
+                color: showThemePanel ? "#FFD700" : "var(--text-secondary)",
+                border: showThemePanel ? "1px solid #FFD700" : "1px solid rgba(255, 255, 255, 0.15)",
+                padding: "2px 8px",
+                borderRadius: "4px",
+                fontSize: "11px",
+                fontWeight: 700,
+                cursor: "pointer",
+                transition: "all 0.2s ease",
+              }}
+            >
+              <Palette size={11} />
+              <span>THEME: {activeTheme.name}</span>
+              <div style={{ display: "flex", alignItems: "center", gap: "2px", marginLeft: "2px" }}>
+                <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: activeTheme.upColor }} />
+                <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: activeTheme.downColor }} />
+              </div>
+              {showThemePanel ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
+            </button>
+
+            {/* THEME SELECTOR POPOVER DROPDOWN */}
+            {showThemePanel && (
+              <div
+                style={{
+                  position: "absolute",
+                  top: "28px",
+                  left: 0,
+                  zIndex: 30,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "6px",
+                  background: "rgba(15, 19, 28, 0.95)",
+                  backdropFilter: "blur(14px)",
+                  WebkitBackdropFilter: "blur(14px)",
+                  padding: "10px 14px",
+                  borderRadius: "8px",
+                  border: "1px solid rgba(255, 255, 255, 0.15)",
+                  boxShadow: "0 8px 32px rgba(0, 0, 0, 0.6)",
+                  minWidth: "200px",
+                }}
+              >
+                <div style={{ fontSize: "10px", color: "var(--text-muted)", fontWeight: 700, letterSpacing: "0.5px", borderBottom: "1px solid rgba(255, 255, 255, 0.1)", paddingBottom: "4px" }}>
+                  CANDLE & VOLUME COLOR THEME
+                </div>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                  {Object.values(CANDLE_THEMES).map((theme) => {
+                    const isSelected = theme.id === selectedThemeId;
+                    return (
+                      <button
+                        key={theme.id}
+                        onClick={() => {
+                          handleThemeChange(theme.id);
+                          setShowThemePanel(false);
+                        }}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          padding: "5px 10px",
+                          borderRadius: "5px",
+                          background: isSelected ? "rgba(255, 215, 0, 0.15)" : "transparent",
+                          border: isSelected ? "1px solid rgba(255, 215, 0, 0.4)" : "1px solid transparent",
+                          cursor: "pointer",
+                          transition: "all 0.2s ease",
+                        }}
+                      >
+                        <span style={{ fontSize: "11px", fontWeight: isSelected ? 700 : 500, color: isSelected ? "#FFD700" : "var(--text-secondary)" }}>
+                          {theme.name}
+                        </span>
+                        <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                          <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: theme.upColor }} />
+                          <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: theme.downColor }} />
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div style={{ borderTop: "1px solid rgba(255, 255, 255, 0.08)", marginTop: "6px", paddingTop: "8px" }}>
+                  <div style={{ fontSize: "10px", color: "var(--text-muted)", fontWeight: 700, letterSpacing: "0.5px", paddingBottom: "6px" }}>
+                    CANDLE BODY STYLE
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px" }}>
+                    <span style={{ fontSize: "11px", fontWeight: 600, color: isHollowMode ? "var(--accent-cyan)" : "var(--text-secondary)" }}>
+                      Hollow Candles
+                    </span>
+                    <button
+                      onClick={toggleHollowMode}
+                      style={{
+                        background: isHollowMode ? "rgba(0, 229, 255, 0.2)" : "rgba(255, 255, 255, 0.06)",
+                        border: isHollowMode ? "1px solid var(--accent-cyan)" : "1px solid rgba(255, 255, 255, 0.15)",
+                        color: isHollowMode ? "var(--accent-cyan)" : "var(--text-muted)",
+                        padding: "2px 10px",
+                        borderRadius: "4px",
+                        fontSize: "10px",
+                        fontWeight: 700,
+                        cursor: "pointer",
+                        transition: "all 0.2s ease",
+                      }}
+                    >
+                      {isHollowMode ? "HOLLOW" : "FILLED"}
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
