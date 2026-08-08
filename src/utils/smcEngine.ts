@@ -60,6 +60,8 @@ export interface PremiumDiscountRange {
   lowTime: number;
 }
 
+export const detectFVG = detectFVGs;
+
 /**
  * Detect Fair Value Gaps (FVG) across intraday candlestick series.
  */

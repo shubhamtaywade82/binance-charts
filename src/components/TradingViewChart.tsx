@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import type { IDataAdapter } from "../adapters/IDataAdapter";
 import {
   createChart,
   ColorType,
@@ -31,6 +32,8 @@ import {
   detectVolumeProfile,
   VolumeProfileResult,
 } from "../utils/smcEngine";
+import { AdaptiveSupertrend, SupertrendPoint, TrendDirection } from "../utils/adaptiveSupertrend";
+import { MarketRegimeEngine } from "../utils/marketRegimeEngine";
 
 export function getPricePrecision(price: number): { precision: number; minMove: number } {
   const abs = Math.abs(price);
@@ -176,6 +179,7 @@ export const CANDLE_THEMES: Record<string, CandleTheme> = {
 };
 
 export interface ChartProps {
+  adapter: IDataAdapter;  // broker/datasource — all data flows through this
   symbol: string;
   interval: string;
   showIndicators?: boolean;
@@ -204,7 +208,7 @@ const autoHtfMult = (baseMin: number): number => {
   return ladder[baseMin] ?? 4;
 };
 
-export const sanitizeAndSortCandles = (raw: any[]): any[] => {
+export const sanitizeAndSortCandles = (raw: any[], is24x7 = true): any[] => {
   if (!Array.isArray(raw)) return [];
   const valid = raw
     .filter((c) => c && typeof c.time === "number" && !isNaN(c.time) && c.time > 0)
@@ -222,44 +226,54 @@ export const sanitizeAndSortCandles = (raw: any[]): any[] => {
     map.set(c.time, c);
   }
   const sorted = Array.from(map.values()).sort((a, b) => a.time - b.time);
-  return fillCandleGaps(sorted);
+  return fillCandleGaps(sorted, is24x7);
 };
 
 // Fills missing interval slots with flat synthetic candles so the chart shows
-// no blank gaps when Binance has sporadic missing bars or month-boundary misalignment.
-export const fillCandleGaps = (sorted: any[]): any[] => {
+// no blank gaps when an exchange has sporadic missing bars.
+// For non-24x7 markets (DhanHQ/NSE), overnight and weekend gaps (> 4h) are
+// natural market closed sessions and are NEVER filled with synthetic candles.
+export const fillCandleGaps = (sorted: any[], is24x7 = true): any[] => {
   if (sorted.length < 2) return sorted;
 
-  // Detect interval in seconds from the median gap (avoids outliers)
+  // Detect interval in seconds from the median gap (ignoring overnight jumps > 6h)
   const gaps: number[] = [];
   for (let i = 1; i < Math.min(sorted.length, 50); i++) {
-    gaps.push(sorted[i].time - sorted[i - 1].time);
+    const diff = sorted[i].time - sorted[i - 1].time;
+    if (diff > 0 && diff < 21600) {
+      gaps.push(diff);
+    }
   }
   gaps.sort((a, b) => a - b);
-  const intervalSecs = gaps[Math.floor(gaps.length / 2)];
+  const intervalSecs = gaps.length > 0 ? gaps[Math.floor(gaps.length / 2)] : 900;
   if (!intervalSecs || intervalSecs <= 0) return sorted;
 
-  // Snap every timestamp to exact interval boundary to fix Binance month-boundary misalignment
-  // (e.g. 1753920001 → 1753920000 for a 900s interval)
+  // Snap every timestamp to exact interval boundary to fix minor exchange jitter
   const snapped = sorted.map((c) => ({
     ...c,
     time: Math.round(c.time / intervalSecs) * intervalSecs,
   }));
 
-  // Re-deduplicate after snapping (two candles may now share the same slot)
+  // Re-deduplicate after snapping
   const snapMap = new Map<number, any>();
   for (const c of snapped) {
     if (!snapMap.has(c.time)) snapMap.set(c.time, c);
   }
   const deduped = Array.from(snapMap.values()).sort((a, b) => a.time - b.time);
 
-  // Fill gaps: any slot jump > 1.1× interval gets synthetic flat candles
+  // Maximum allowed gap to fill:
+  // - For 24x7 crypto (Binance): up to 20 intervals
+  // - For non-24x7 session markets (NSE/DhanHQ): max 4 hours (never fill overnights/weekends)
+  const maxGapToFill = is24x7 ? intervalSecs * 20 : Math.min(intervalSecs * 5, 4 * 3600);
+
   const result: any[] = [deduped[0]];
   for (let i = 1; i < deduped.length; i++) {
     const prev = deduped[i - 1];
     const curr = deduped[i];
     const gap = curr.time - prev.time;
-    if (gap > intervalSecs * 1.1) {
+
+    // Only fill small intraday missing bars within an active trading session
+    if (gap > intervalSecs * 1.1 && gap <= maxGapToFill) {
       let t = prev.time + intervalSecs;
       while (t < curr.time - intervalSecs * 0.5) {
         result.push({
@@ -297,14 +311,8 @@ const DEFAULT_SCALE_SETTINGS: ChartScaleSettings = {
   isLogScale: false,
 };
 
-export const TradingViewChart: React.FC<ChartProps> = ({
-  symbol,
-  interval,
-  showIndicators = true,
-  livePrice,
-  customCandles,
-  tick,
-}) => {
+export const TradingViewChart: React.FC<ChartProps> = (props) => {
+  const { adapter, symbol, interval, showIndicators = true, livePrice, customCandles, tick } = props;
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isLazyLoading, setIsLazyLoading] = useState(false);
@@ -797,6 +805,31 @@ export const TradingViewChart: React.FC<ChartProps> = ({
     });
   };
 
+  // Adaptive Supertrend (AI-KNN Percentile Trail)
+  const [showAdaptiveSupertrend, setShowAdaptiveSupertrend] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem("chart_show_adaptive_supertrend") === "true";
+    } catch {}
+    return false;
+  });
+
+  const toggleAdaptiveSupertrend = () => {
+    setShowAdaptiveSupertrend((prev) => {
+      const next = !prev;
+      try { localStorage.setItem("chart_show_adaptive_supertrend", String(next)); } catch {}
+      return next;
+    });
+  };
+
+  // Immediate repaint on any indicator toggle change
+  useEffect(() => {
+    scheduleDraw();
+  }, [
+    showFVG, showOB, showStructure, showLiquidity, showEquilibrium,
+    showICTSessions, showSilverBullet, showOTE, showJudas, showAMD,
+    showSD, showTL, showCP, showVolumeProfile, showAdaptiveSupertrend
+  ]);
+
   // Futures Setup Scanner State (persisted to localStorage)
   const [showSetupScan, setShowSetupScan] = useState<boolean>(() => {
     try {
@@ -942,9 +975,11 @@ export const TradingViewChart: React.FC<ChartProps> = ({
     tl: { label: "Trendline Liquidity (S/R)", color: "#00F5A0", get: () => showTL, set: (v) => { persistIndicator("chart_show_tl", v); setShowTL(v); } },
     cp: { label: "Candlestick Patterns", color: "#FFD700", icon: "🔨", get: () => showCP, set: (v) => { persistIndicator("chart_show_cp", v); setShowCP(v); } },
     volumeProfile: { label: "Volume Profile (VPVR, POC, VAH, VAL)", color: "#FFD700", get: () => showVolumeProfile, set: (v) => { persistIndicator("chart_show_volume_profile", v); setShowVolumeProfile(v); } },
+    adaptiveSupertrend: { label: "Adaptive Supertrend (AI-KNN)", color: "#00F5A0", icon: "🤖", get: () => showAdaptiveSupertrend, set: (v) => { persistIndicator("chart_show_adaptive_supertrend", v); setShowAdaptiveSupertrend(v); } },
   };
 
   const INDICATOR_SETS: IndicatorSetDef[] = [
+    { id: "ai", label: "AI & ADAPTIVE SYSTEMS", keys: ["adaptiveSupertrend"] },
     { id: "ma", label: "MOVING AVERAGES", keys: ["sma20", "ema9"] },
     { id: "smc", label: "SMART MONEY CONCEPTS (SMC)", keys: ["fvg", "ob", "structure", "liquidity", "equilibrium", "volumeProfile"] },
     { id: "ict", label: "ICT", keys: ["ictSessions", "silverBullet", "ote", "judas", "amd"] },
@@ -1211,7 +1246,7 @@ export const TradingViewChart: React.FC<ChartProps> = ({
   const smcFlagsRef = useRef({
     fvg: true, ob: true, structure: true, liquidity: true, equilibrium: true,
     ictSessions: true, silverBullet: true, ote: true, judas: true, amd: true,
-    sd: true, tl: true, cp: true, volumeProfile: true,
+    sd: true, tl: true, cp: true, volumeProfile: true, adaptiveSupertrend: true,
   });
   smcFlagsRef.current = {
     fvg: showFVG,
@@ -1228,6 +1263,7 @@ export const TradingViewChart: React.FC<ChartProps> = ({
     tl: showTL,
     cp: showCP,
     volumeProfile: showVolumeProfile,
+    adaptiveSupertrend: showAdaptiveSupertrend,
   };
 
   const smcCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -2075,6 +2111,140 @@ export const TradingViewChart: React.FC<ChartProps> = ({
         }
       } catch (e) {}
     }
+
+    // 15. Render Adaptive Supertrend (AI-KNN dynamic trailing rail + flip markers)
+    if (smcFlagsRef.current.adaptiveSupertrend && allCandlesRef.current.length > 5) {
+      try {
+        const supertrendPoints: SupertrendPoint[] = getCached("adaptiveSupertrend", () => {
+          const supertrendEngine = new AdaptiveSupertrend(10, 3.0, 85, 150, 25, 1.0, 6.0);
+          return supertrendEngine.computeFullSeries(allCandlesRef.current);
+        });
+
+        if (supertrendPoints && supertrendPoints.length > 1) {
+          const offset = allCandlesRef.current.length - supertrendPoints.length;
+
+          // Group consecutive points into continuous smooth segments by trend
+          let currentSegment: { trend: TrendDirection; pts: { x: number; y: number; time: number }[] } | null = null;
+          const segments: { trend: TrendDirection; pts: { x: number; y: number; time: number }[] }[] = [];
+
+          for (let i = 0; i < supertrendPoints.length; i++) {
+            const pt = supertrendPoints[i];
+            const x = timeScale.timeToCoordinate(pt.time as any);
+            const y = series.priceToCoordinate(pt.supertrend);
+
+            if (x !== null && y !== null && !isNaN(x) && !isNaN(y) && x >= -50 && x <= maxVisibleX + 50) {
+              if (!currentSegment || currentSegment.trend !== pt.trend) {
+                currentSegment = { trend: pt.trend, pts: [{ x, y, time: pt.time }] };
+                segments.push(currentSegment);
+              } else {
+                currentSegment.pts.push({ x, y, time: pt.time });
+              }
+            } else if (currentSegment && currentSegment.pts.length > 0) {
+              currentSegment = null;
+            }
+          }
+
+          ctx.save();
+          ctx.lineCap = "round";
+          ctx.lineJoin = "round";
+
+          // Render each continuous smooth segment
+          segments.forEach((seg) => {
+            if (seg.pts.length < 2) return;
+            const isUp = seg.trend === "UP";
+            const strokeColor = isUp ? "#00F5A0" : "#FF495C";
+            const glowColor = isUp ? "rgba(0, 245, 160, 0.4)" : "rgba(255, 73, 92, 0.4)";
+            const fillColor = isUp ? "rgba(0, 245, 160, 0.08)" : "rgba(255, 73, 92, 0.08)";
+
+            // Step A: Soft trailing area fill between rail and candles
+            ctx.beginPath();
+            ctx.moveTo(seg.pts[0].x, seg.pts[0].y);
+            for (let j = 1; j < seg.pts.length; j++) {
+              ctx.lineTo(seg.pts[j].x, seg.pts[j].y);
+            }
+            for (let j = seg.pts.length - 1; j >= 0; j--) {
+              const candle = allCandlesRef.current.find((c) => c.time === seg.pts[j].time);
+              if (candle) {
+                const candleY = series.priceToCoordinate(isUp ? candle.low : candle.high);
+                if (candleY !== null && !isNaN(candleY)) {
+                  ctx.lineTo(seg.pts[j].x, candleY);
+                }
+              }
+            }
+            ctx.closePath();
+            ctx.fillStyle = fillColor;
+            ctx.fill();
+
+            // Step B: Glowing ambient aura pass
+            ctx.shadowColor = glowColor;
+            ctx.shadowBlur = 10;
+            ctx.strokeStyle = strokeColor;
+            ctx.lineWidth = 2.5;
+
+            ctx.beginPath();
+            ctx.moveTo(seg.pts[0].x, seg.pts[0].y);
+            for (let j = 1; j < seg.pts.length; j++) {
+              ctx.lineTo(seg.pts[j].x, seg.pts[j].y);
+            }
+            ctx.stroke();
+
+            // Reset shadow
+            ctx.shadowBlur = 0;
+            ctx.shadowColor = "transparent";
+          });
+
+          // Step C: Render clean glowing AI flip badges with multi-factor confidence %
+          for (let i = 1; i < supertrendPoints.length; i++) {
+            const ptCurr = supertrendPoints[i];
+            if (ptCurr.signal === "BUY" || ptCurr.signal === "SELL") {
+              const x = timeScale.timeToCoordinate(ptCurr.time as any);
+              const isBuy = ptCurr.signal === "BUY";
+              const candle = allCandlesRef.current.find((c) => c.time === ptCurr.time);
+
+              if (x !== null && !isNaN(x) && x >= 0 && x <= maxVisibleX && candle) {
+                const candleY = series.priceToCoordinate(isBuy ? candle.low : candle.high);
+                if (candleY !== null && !isNaN(candleY)) {
+                  const tagY = isBuy ? candleY + 28 : candleY - 28;
+                  const isPrime = ptCurr.confidenceTier === "PRIME" || ptCurr.confidence >= 85;
+                  const badgeColor = isPrime ? "#FFD700" : isBuy ? "#00F5A0" : "#FF495C";
+                  const badgeText = `${isBuy ? "▲ AI BUY" : "▼ AI SELL"} ${ptCurr.confidence}%`;
+
+                  // Draw pill container with glowing border
+                  const textWidth = 84;
+                  const pillHeight = 18;
+                  const pillX = x - textWidth / 2;
+                  const pillY = isBuy ? tagY - 2 : tagY - 16;
+
+                  ctx.shadowColor = isPrime ? "rgba(255, 215, 0, 0.45)" : isBuy ? "rgba(0, 245, 160, 0.35)" : "rgba(255, 73, 92, 0.35)";
+                  ctx.shadowBlur = isPrime ? 8 : 4;
+
+                  ctx.fillStyle = isBuy ? "rgba(0, 245, 160, 0.18)" : "rgba(255, 73, 92, 0.18)";
+                  ctx.strokeStyle = badgeColor;
+                  ctx.lineWidth = isPrime ? 1.6 : 1.2;
+
+                  ctx.beginPath();
+                  ctx.roundRect ? ctx.roundRect(pillX, pillY, textWidth, pillHeight, 4) : ctx.rect(pillX, pillY, textWidth, pillHeight);
+                  ctx.fill();
+                  ctx.stroke();
+
+                  ctx.shadowBlur = 0;
+                  ctx.shadowColor = "transparent";
+
+                  // Pill Text
+                  ctx.fillStyle = badgeColor;
+                  ctx.font = "bold 9px monospace";
+                  ctx.textAlign = "center";
+                  ctx.textBaseline = "middle";
+                  ctx.fillText(badgeText, x, pillY + pillHeight / 2);
+                }
+              }
+            }
+          }
+
+          ctx.restore();
+        }
+      } catch (e) {}
+    }
   };
 
   // Toggle Hollow Candles Mode (persisted to localStorage)
@@ -2110,19 +2280,15 @@ export const TradingViewChart: React.FC<ChartProps> = ({
         if (customCandles && customCandles.length > 0) {
           candlesArray = customCandles;
         } else {
-          const res = await fetch(
-            `/api/charts/intraday?symbol=${encodeURIComponent(symbol)}&interval=${interval}`
-          );
-          const json = await res.json();
-          if (!res.ok || !json.candles || json.candles.length === 0) {
-            throw new Error(json.error || "Failed to load candle data");
+          const candles = await adapter.fetchCandles(symbol, interval);
+          if (!candles || candles.length === 0) {
+            throw new Error("Failed to load candle data");
           }
-          candlesArray = json.candles;
+          candlesArray = candles;
         }
 
-        if (!isSubscribed) return;
-
-        const formattedCandles = sanitizeAndSortCandles(candlesArray);
+        const is24x7 = adapter?.is24x7 ?? true;
+        const formattedCandles = sanitizeAndSortCandles(candlesArray, is24x7);
         if (formattedCandles.length === 0) {
           setIsLoading(false);
           return;
@@ -2167,13 +2333,14 @@ export const TradingViewChart: React.FC<ChartProps> = ({
               locale: "en-US",
               timeFormatter: (timestamp: number) => {
                 const date = new Date(timestamp * 1000);
+                const is24x7 = adapter?.is24x7 ?? true;
                 return (
                   date.toLocaleTimeString("en-GB", {
-                    timeZone: "UTC",
+                    timeZone: is24x7 ? "UTC" : "Asia/Kolkata",
                     hour12: false,
                     hour: "2-digit",
                     minute: "2-digit",
-                  }) + " UTC"
+                  }) + (is24x7 ? " UTC" : " IST")
                 );
               },
               dateFormat: "dd MMM yyyy",
@@ -2292,13 +2459,14 @@ export const TradingViewChart: React.FC<ChartProps> = ({
               const fmt = (d: Date) => d.toISOString().split("T")[0];
 
               try {
-                const histRes = await fetch(
-                  `/api/charts/historical?symbol=${encodeURIComponent(symbol)}&fromDate=${fmt(fromDateObj)}&toDate=${fmt(toDateObj)}&interval=${interval}`
+                const histCandles = await props.adapter.fetchHistoricalCandles(
+                  symbol, interval,
+                  Math.floor(fromDateObj.getTime() / 1000),
+                  Math.floor(toDateObj.getTime() / 1000)
                 );
-                const histJson = await histRes.json();
 
-                if (histJson.candles && histJson.candles.length > 0 && isSubscribed) {
-                  const histCandles = histJson.candles.map((c: any) => ({
+                if (histCandles && histCandles.length > 0 && isSubscribed) {
+                  const histCandlesMapped = histCandles.map((c: any) => ({
                     time: Number(c.time),
                     open: Number(c.open),
                     high: Number(c.high),
@@ -2307,8 +2475,8 @@ export const TradingViewChart: React.FC<ChartProps> = ({
                     volume: Number(c.volume || 0),
                   }));
 
-                  const existingTimeSet = new Set(allCandlesRef.current.map((x) => x.time));
-                  const uniqueNewHist = histCandles.filter((x: any) => !existingTimeSet.has(x.time));
+                  const existingTimeSet = new Set(allCandlesRef.current.map((x: any) => x.time));
+                  const uniqueNewHist = histCandlesMapped.filter((x: any) => !existingTimeSet.has(x.time));
 
                   if (uniqueNewHist.length > 0) {
                     const combined = [...uniqueNewHist, ...allCandlesRef.current].sort(
@@ -2396,16 +2564,16 @@ export const TradingViewChart: React.FC<ChartProps> = ({
         const toTs = oldest.time;
         const toDate = new Date(toTs * 1000).toISOString();
         const fromDate = new Date((toTs - 7 * 86400) * 1000).toISOString();
-        const res = await fetch(
-          `/api/charts/historical?symbol=${encodeURIComponent(symbol)}&interval=${interval}&fromDate=${fromDate}&toDate=${toDate}`
+        const olderCandles = await props.adapter.fetchHistoricalCandles(
+          symbol, interval, Math.floor(new Date(fromDate).getTime() / 1000), toTs
         );
-        const json = await res.json();
-        if (json?.candles?.length) {
-          const older = sanitizeAndSortCandles(json.candles).filter(
+        const is24x7 = adapter?.is24x7 ?? true;
+        if (olderCandles?.length) {
+          const older = sanitizeAndSortCandles(olderCandles, is24x7).filter(
             (c: any) => c.time < oldest.time
           );
           if (older.length > 0 && seriesRef.current) {
-            const merged = sanitizeAndSortCandles([...older, ...allCandlesRef.current]);
+            const merged = sanitizeAndSortCandles([...older, ...allCandlesRef.current], is24x7);
             allCandlesRef.current = merged;
             const mergedVolume = merged.map((c: any) => ({
               time: c.time,
@@ -2425,12 +2593,10 @@ export const TradingViewChart: React.FC<ChartProps> = ({
     const reconcileTimer = setInterval(async () => {
       if (!isSubscribed || customCandles?.length) return;
       try {
-        const res = await fetch(
-          `/api/charts/intraday?symbol=${encodeURIComponent(symbol)}&interval=${interval}`
-        );
-        const json = await res.json();
-        if (json?.candles?.length && seriesRef.current) {
-          const authoritativeCandles = sanitizeAndSortCandles(json.candles);
+        const fresh = await props.adapter.fetchCandles(symbol, interval);
+        if (fresh?.length && seriesRef.current) {
+          const is24x7 = adapter?.is24x7 ?? true;
+          const authoritativeCandles = sanitizeAndSortCandles(fresh, is24x7);
           if (authoritativeCandles.length > 0) {
             allCandlesRef.current = authoritativeCandles;
 
@@ -2534,12 +2700,10 @@ export const TradingViewChart: React.FC<ChartProps> = ({
             // Reconcile ALL previous candles with the Binance authoritative intraday endpoint 2.5s post-close
             setTimeout(async () => {
               try {
-                const res = await fetch(
-                  `/api/charts/intraday?symbol=${encodeURIComponent(symbol)}&interval=${interval}`
-                );
-                const json = await res.json();
-                if (json?.candles?.length && seriesRef.current) {
-                  const authoritativeCandles = sanitizeAndSortCandles(json.candles);
+                const fresh = await props.adapter.fetchCandles(symbol, interval);
+                if (fresh?.length && seriesRef.current) {
+                  const is24x7 = adapter?.is24x7 ?? true;
+                  const authoritativeCandles = sanitizeAndSortCandles(fresh, is24x7);
                   if (authoritativeCandles.length > 0) {
                     allCandlesRef.current = authoritativeCandles;
 
@@ -3805,6 +3969,87 @@ export const TradingViewChart: React.FC<ChartProps> = ({
           AUTO
         </button>
       </div>
+
+      {/* Floating Live AI Execution Directive HUD */}
+      {showAdaptiveSupertrend && allCandlesRef.current.length > 5 && (() => {
+        try {
+          const candles = allCandlesRef.current;
+          const engine = new AdaptiveSupertrend(10, 3.0, 85, 150, 25, 1.0, 6.0);
+          const sig = engine.update(candles);
+          const regime = MarketRegimeEngine.evaluateMarketRegime(candles);
+          const isChop = regime.isChop;
+          const isBuy = sig.trend === "UP";
+          const isPrime = sig.confidenceTier === "PRIME" || sig.confidence >= 85;
+          const isTake = sig.confidence >= 70 && sig.type !== "HOLD" && !isChop;
+          const currency = adapter.currency || "$";
+
+          return (
+            <div
+              style={{
+                position: "absolute",
+                top: "42px",
+                left: "14px",
+                zIndex: 12,
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+                background: "rgba(10, 13, 20, 0.9)",
+                backdropFilter: "blur(10px)",
+                border: `1px solid ${
+                  isTake
+                    ? isBuy
+                      ? "rgba(0, 245, 160, 0.45)"
+                      : "rgba(255, 73, 92, 0.45)"
+                    : isChop
+                    ? "rgba(255, 73, 92, 0.4)"
+                    : "rgba(255, 215, 0, 0.45)"
+                }`,
+                borderRadius: "6px",
+                padding: "5px 12px",
+                boxShadow: "0 4px 20px rgba(0,0,0,0.6)",
+                fontSize: "11px",
+                fontWeight: 800,
+                pointerEvents: "none",
+              }}
+            >
+              <span
+                style={{
+                  color: isTake ? (isBuy ? "#00F5A0" : "#FF495C") : isChop ? "#FF495C" : "#FFD700",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "4px",
+                }}
+              >
+                {isTake
+                  ? isBuy
+                    ? "🟢 DIRECTIVE: TAKE LONG TRADE"
+                    : "🔴 DIRECTIVE: TAKE SHORT TRADE"
+                  : isChop
+                  ? `⛔ DIRECTIVE: STAND ASIDE (CHOP ${regime.chopIndex} > 61.8)`
+                  : "⛔ DIRECTIVE: STAND ASIDE / AVOID"}
+              </span>
+              <span style={{ color: "var(--text-muted)", fontWeight: 500 }}>·</span>
+              <span style={{ color: isPrime ? "#FFD700" : "#00F5A0" }}>
+                AI CONFIDENCE: {sig.confidence}% ({sig.confidenceTier})
+              </span>
+              <span style={{ color: "var(--text-muted)", fontWeight: 500 }}>·</span>
+              <span style={{ color: regime.chopIndex >= 61.8 ? "#FF495C" : regime.chopIndex <= 38.2 ? "#00F5A0" : "#FFD700" }}>
+                CHOP: {regime.chopIndex} {regime.chopIndex >= 61.8 ? "(HIGH CHOP)" : regime.chopIndex <= 38.2 ? "(TRENDING)" : ""}
+              </span>
+              <span style={{ color: "var(--text-muted)", fontWeight: 500 }}>·</span>
+              <span style={{ color: regime.adx >= 25 ? "#00F5A0" : "#FF495C" }}>
+                ADX: {regime.adx}
+              </span>
+              <span style={{ color: "var(--text-muted)", fontWeight: 500 }}>·</span>
+              <span style={{ color: "var(--text-secondary)", fontFamily: "monospace" }}>
+                STOP: {currency}{sig.stop.toLocaleString()}
+              </span>
+            </div>
+          );
+        } catch (e) {
+          return null;
+        }
+      })()}
 
       {/* Canvas Container */}
       <div ref={chartContainerRef} style={{ width: "100%", height: "100%", minHeight: "520px" }} />
